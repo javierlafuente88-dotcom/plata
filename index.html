@@ -6,6 +6,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1" />
 <meta name="description" content="Control de ingresos, gastos, tarjetas en cuotas e inversiones." />
 <meta name="theme-color" content="#ECEFEA" />
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+<meta http-equiv="Pragma" content="no-cache" />
+<meta http-equiv="Expires" content="0" />
 <meta name="mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="default" />
@@ -48,6 +51,26 @@
 <body>
 <div id="root"><div class="cargando">Abriendo tus n&uacute;meros&hellip;</div></div>
 
+<script>
+/* Actualizador: al abrir, compara con la versión publicada y se refresca solo. */
+(function () {
+  var VERSION = "20fe9e6b94";
+  window.__PLATA_VERSION__ = VERSION;
+  var base = location.pathname;
+  try {
+    fetch(base + "?_=" + Date.now(), { cache: "no-store" })
+      .then(function (r) { return r.text(); })
+      .then(function (txt) {
+        var m = txt.match(/var VERSION = "([a-f0-9]+)"/);
+        if (!m || m[1] === VERSION) return;
+        if (sessionStorage.getItem("plata-recarga") === m[1]) return;
+        sessionStorage.setItem("plata-recarga", m[1]);
+        location.replace(base + "?v=" + m[1]);
+      })
+      .catch(function () {});
+  } catch (e) {}
+})();
+</script>
 <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
 <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
 <script>
@@ -3010,7 +3033,13 @@ function Ajustes({
       marginBottom: 14,
       lineHeight: 1.5
     }
-  }, db.movs.length, " movimientos, ", db.tarjetas.length, " tarjetas, ", db.inversiones.length, " inversiones y ", db.objetivos.length, " metas. Todo queda guardado en este dispositivo. Con “Guardar copia” bajás un archivo que después podés restaurar en otro teléfono o en la compu."), /*#__PURE__*/React.createElement(Boton, {
+  }, db.movs.length, " movimientos, ", db.tarjetas.length, " tarjetas, ", db.inversiones.length, " inversiones y ", db.objetivos.length, " metas. Todo queda guardado en este dispositivo. Con “Guardar copia” bajás un archivo que después podés restaurar en otro teléfono o en la compu.", typeof window !== "undefined" && window.__PLATA_VERSION__ ? /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: 8,
+      fontFamily: MONO,
+      fontSize: 11.5
+    }
+  }, "versión ", window.__PLATA_VERSION__) : null), /*#__PURE__*/React.createElement(Boton, {
     onClick: exportarTodo,
     style: {
       width: "100%",
