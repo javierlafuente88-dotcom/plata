@@ -162,6 +162,25 @@ const fmtK = n => {
 };
 const uid = () => Math.random().toString(36).slice(2, 10);
 
+/* --- montos con separador de miles mientras se escribe --- */
+const nfEdit = new Intl.NumberFormat("es-AR", {
+  maximumFractionDigits: 2
+});
+const textoDeNum = n => n === "" || n === undefined || n === null || isNaN(Number(n)) ? "" : nfEdit.format(Number(n));
+const conMiles = v => {
+  const limpio = String(v).replace(/[^\d,]/g, "");
+  const [ent, ...resto] = limpio.split(",");
+  const entero = ent ? nfEdit.format(Number(ent)) : "";
+  if (resto.length === 0) return entero;
+  return entero + "," + resto.join("").slice(0, 2);
+};
+const aNumero = v => {
+  if (typeof v === "number") return v;
+  const n = parseFloat(String(v).replace(/\./g, "").replace(",", "."));
+  return isNaN(n) ? 0 : n;
+};
+const soloTasa = v => String(v).replace(/[^\d,]/g, "").replace(/,(?=.*,)/g, "");
+
 /* --- cuotas de tarjeta --- */
 function primeraCuota(mov, tj) {
   const [Y, M, D] = mov.fecha.split("-").map(Number);
@@ -224,6 +243,46 @@ function itemsDelMes(db, y, m) {
     }
   }
   return out.sort((a, b) => b._dia - a._dia);
+}
+
+/* Lo que apartaste este mes: aportes a metas y plata puesta a invertir.
+   Sale del bolsillo igual que un gasto, por eso pesa en el balance. */
+function ahorrosDelMes(db, y, m) {
+  const key = mIdx(y, m);
+  const out = [];
+  (db.objetivos || []).forEach(o => {
+    (o.aportes || []).forEach((a, i) => {
+      const [Y, M, D] = String(a.fecha).split("-").map(Number);
+      if (mIdx(Y, M - 1) === key) {
+        out.push({
+          tipo: "ahorro",
+          medio: "ahorro",
+          _id: `ap-${o.id}-${i}`,
+          _monto: Number(a.monto) || 0,
+          _fecha: a.fecha,
+          _dia: D,
+          desc: o.nombre,
+          cat: "Meta de ahorro"
+        });
+      }
+    });
+  });
+  (db.inversiones || []).forEach(inv => {
+    const [Y, M, D] = String(inv.fecha).split("-").map(Number);
+    if (mIdx(Y, M - 1) === key) {
+      out.push({
+        tipo: "ahorro",
+        medio: "ahorro",
+        _id: `inv-${inv.id}`,
+        _monto: Number(inv.monto) || 0,
+        _fecha: inv.fecha,
+        _dia: D,
+        desc: inv.nombre,
+        cat: "Lo pusiste a invertir"
+      });
+    }
+  });
+  return out;
 }
 function cuotasPendientes(db, desdeKey) {
   const res = [];
@@ -672,13 +731,14 @@ function App() {
   }, [db]);
   const keyActual = mIdx(hoy.getFullYear(), hoy.getMonth());
   const keyCur = mIdx(cur.y, cur.m);
-  const items = useMemo(() => db ? itemsDelMes(db, cur.y, cur.m) : [], [db, cur]);
+  const items = useMemo(() => db ? [...itemsDelMes(db, cur.y, cur.m), ...ahorrosDelMes(db, cur.y, cur.m)].sort((a, b) => b._dia - a._dia) : [], [db, cur]);
   const totales = useMemo(() => {
     let ing = 0,
       gas = 0,
-      tarj = 0;
+      tarj = 0,
+      aho = 0;
     for (const it of items) {
-      if (it.tipo === "ingreso") ing += it._monto;else {
+      if (it.tipo === "ingreso") ing += it._monto;else if (it.tipo === "ahorro") aho += it._monto;else {
         gas += it._monto;
         if (it.medio === "tarjeta") tarj += it._monto;
       }
@@ -687,7 +747,8 @@ function App() {
       ing,
       gas,
       tarj,
-      saldo: ing - gas
+      aho,
+      saldo: ing - gas - aho
     };
   }, [items]);
   const pend = useMemo(() => db ? cuotasPendientes(db, keyActual) : [], [db, keyActual]);
@@ -1197,7 +1258,8 @@ function Inicio({
   })), /*#__PURE__*/React.createElement("div", {
     className: "flex",
     style: {
-      gap: 14
+      gap: 12,
+      flexWrap: "wrap"
     }
   }, [{
     l: "Entró",
@@ -1211,10 +1273,14 @@ function Inicio({
     l: "Tarjetas",
     v: totales.tarj,
     c: C.gold
+  }, {
+    l: "Guardaste",
+    v: totales.aho,
+    c: C.inv
   }].map(x => /*#__PURE__*/React.createElement("div", {
     key: x.l,
     style: {
-      flex: 1
+      width: "calc(50% - 6px)"
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
@@ -1232,7 +1298,14 @@ function Inicio({
     size: 16,
     color: x.c,
     weight: 600
-  })))))), /*#__PURE__*/React.createElement(Panel, {
+  }))))), totales.aho > 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11.5,
+      color: C.muted,
+      marginTop: 14,
+      lineHeight: 1.45
+    }
+  }, "El balance ya tiene descontado lo que apartaste para metas e inversiones.")), /*#__PURE__*/React.createElement(Panel, {
     style: {
       marginTop: 12
     }
@@ -1474,7 +1547,9 @@ function Inicio({
     key: it._id,
     it: it,
     db: db,
-    onClick: () => setDetalle(db.movs.find(m => m.id === it.id)),
+    onClick: () => {
+      if (it.tipo !== "ahorro") setDetalle(db.movs.find(m => m.id === it.id));
+    },
     primera: i === 0
   })))));
 }
@@ -1488,6 +1563,7 @@ function Fila({
 }) {
   const tj = it.medio === "tarjeta" ? db.tarjetas.find(t => t.id === it.tarjetaId) : null;
   const esIng = it.tipo === "ingreso";
+  const esAho = it.tipo === "ahorro";
   return /*#__PURE__*/React.createElement("div", {
     onClick: onClick,
     className: "flex items-center justify-between",
@@ -1515,7 +1591,7 @@ function Fila({
       color: C.muted,
       marginTop: 2
     }
-  }, esIng && it.cia ? it.cia + " · " : "", it.cat ? it.cat + " · " : "", tj ? tj.nombre + " " : "", it._cuota ? `cuota ${it._cuota}` : it._rec ? "fijo mensual" : MEDIOS.find(m => m.id === it.medio)?.label)), /*#__PURE__*/React.createElement("div", {
+  }, esAho ? it.cat : /*#__PURE__*/React.createElement(React.Fragment, null, esIng && it.cia ? it.cia + " · " : "", it.cat ? it.cat + " · " : "", tj ? tj.nombre + " " : "", it._cuota ? `cuota ${it._cuota}` : it._rec ? "fijo mensual" : MEDIOS.find(m => m.id === it.medio)?.label))), /*#__PURE__*/React.createElement("div", {
     style: {
       textAlign: "right",
       whiteSpace: "nowrap"
@@ -1525,7 +1601,7 @@ function Fila({
       fontFamily: MONO,
       fontSize: 14.5,
       fontWeight: 600,
-      color: esIng ? C.in : C.ink,
+      color: esIng ? C.in : esAho ? C.inv : C.ink,
       fontVariantNumeric: "tabular-nums"
     }
   }, esIng ? "+" : "−", fmt(it._monto).slice(1)), /*#__PURE__*/React.createElement("div", {
@@ -2090,8 +2166,8 @@ function FormInversion({
 }) {
   const [f, setF] = useState({
     ...inv,
-    monto: String(inv.monto || ""),
-    tna: String(inv.tna || "")
+    monto: textoDeNum(inv.monto),
+    tna: inv.tna ? String(inv.tna).replace(".", ",") : ""
   });
   const set = (k, v) => setF(p => ({
     ...p,
@@ -2099,10 +2175,10 @@ function FormInversion({
   }));
   const c = calcInv({
     ...f,
-    monto: Number(f.monto) || 0,
-    tna: Number(f.tna) || 0
+    monto: aNumero(f.monto),
+    tna: aNumero(f.tna)
   });
-  const valido = f.nombre && Number(f.monto) > 0 && f.fecha;
+  const valido = f.nombre && aNumero(f.monto) > 0 && f.fecha;
   return /*#__PURE__*/React.createElement(Modal, {
     onClose: onCancel,
     titulo: inv.nombre ? "Editar inversión" : "Nueva inversión"
@@ -2152,10 +2228,10 @@ function FormInversion({
       marginRight: 6
     }
   }, "$"), /*#__PURE__*/React.createElement("input", {
-    type: "number",
+    type: "text",
     inputMode: "decimal",
     value: f.monto,
-    onChange: e => set("monto", e.target.value),
+    onChange: e => set("monto", conMiles(e.target.value)),
     placeholder: "0",
     style: {
       border: "none",
@@ -2180,10 +2256,10 @@ function FormInversion({
       padding: "4px 14px"
     }
   }, /*#__PURE__*/React.createElement("input", {
-    type: "number",
+    type: "text",
     inputMode: "decimal",
     value: f.tna,
-    onChange: e => set("tna", e.target.value),
+    onChange: e => set("tna", soloTasa(e.target.value)),
     placeholder: "0",
     style: {
       border: "none",
@@ -2203,7 +2279,7 @@ function FormInversion({
       color: C.muted,
       marginLeft: 6
     }
-  }, "%"))), Number(f.monto) > 0 && Number(f.tna) > 0 && /*#__PURE__*/React.createElement("div", {
+  }, "%"))), aNumero(f.monto) > 0 && aNumero(f.tna) > 0 && /*#__PURE__*/React.createElement("div", {
     style: {
       background: C.card,
       border: `1px solid ${C.inv}`,
@@ -2300,8 +2376,8 @@ function FormInversion({
     disabled: !valido,
     onClick: () => onSave({
       ...f,
-      monto: Number(f.monto),
-      tna: Number(f.tna)
+      monto: aNumero(f.monto),
+      tna: aNumero(f.tna)
     }),
     style: {
       flex: 2
@@ -2543,7 +2619,7 @@ function FormMeta({
 }) {
   const [f, setF] = useState({
     ...o,
-    meta: String(o.meta || "")
+    meta: textoDeNum(o.meta)
   });
   const set = (k, v) => setF(p => ({
     ...p,
@@ -2578,10 +2654,10 @@ function FormMeta({
       marginRight: 6
     }
   }, "$"), /*#__PURE__*/React.createElement("input", {
-    type: "number",
+    type: "text",
     inputMode: "decimal",
     value: f.meta,
-    onChange: e => set("meta", e.target.value),
+    onChange: e => set("meta", conMiles(e.target.value)),
     placeholder: "0",
     style: {
       border: "none",
@@ -2613,10 +2689,10 @@ function FormMeta({
     }
   }, "Cancelar"), /*#__PURE__*/React.createElement(Boton, {
     tone: "solid",
-    disabled: !f.nombre || !(Number(f.meta) > 0),
+    disabled: !f.nombre || !(aNumero(f.meta) > 0),
     onClick: () => onSave({
       ...f,
-      meta: Number(f.meta)
+      meta: aNumero(f.meta)
     }),
     style: {
       flex: 2
@@ -2649,11 +2725,11 @@ function FormAporte({
       marginRight: 6
     }
   }, "$"), /*#__PURE__*/React.createElement("input", {
-    type: "number",
+    type: "text",
     inputMode: "decimal",
     autoFocus: true,
     value: monto,
-    onChange: e => setMonto(e.target.value),
+    onChange: e => setMonto(conMiles(e.target.value)),
     placeholder: "0",
     style: {
       border: "none",
@@ -2678,8 +2754,8 @@ function FormAporte({
     }
   }, "Cancelar"), /*#__PURE__*/React.createElement(Boton, {
     tone: "solid",
-    disabled: !(Number(monto) > 0),
-    onClick: () => onSave(monto),
+    disabled: !(aNumero(monto) > 0),
+    onClick: () => onSave(aNumero(monto)),
     style: {
       flex: 2
     }
@@ -2699,6 +2775,7 @@ function Movimientos({
     if (filtro === "ingresos" && i.tipo !== "ingreso") return false;
     if (filtro === "gastos" && i.tipo !== "gasto") return false;
     if (filtro === "tarjeta" && i.medio !== "tarjeta") return false;
+    if (filtro === "ahorro" && i.tipo !== "ahorro") return false;
     if (q) {
       const t = `${i.desc || ""} ${i.cat || ""} ${i.cia || ""}`.toLowerCase();
       if (!t.includes(q.toLowerCase())) return false;
@@ -2706,6 +2783,7 @@ function Movimientos({
     return true;
   });
   const total = lista.reduce((a, i) => a + (i.tipo === "ingreso" ? i._monto : -i._monto), 0);
+  const soloMovs = it => it.tipo !== "ahorro";
   const exportar = () => {
     const filas = [["Fecha", "Tipo", "Detalle", "Compañía", "Categoría", "Medio", "Tarjeta", "Cuota", "Monto"]];
     lista.forEach(i => {
@@ -2744,7 +2822,11 @@ function Movimientos({
     active: filtro === "tarjeta",
     onClick: () => setFiltro("tarjeta"),
     color: C.gold
-  }, "Tarjeta")), /*#__PURE__*/React.createElement("div", {
+  }, "Tarjeta"), /*#__PURE__*/React.createElement(Chip, {
+    active: filtro === "ahorro",
+    onClick: () => setFiltro("ahorro"),
+    color: C.inv
+  }, "Ahorro")), /*#__PURE__*/React.createElement("div", {
     className: "flex items-center justify-between",
     style: {
       padding: "2px 2px 12px"
@@ -2769,7 +2851,9 @@ function Movimientos({
     key: it._id,
     it: it,
     db: db,
-    onClick: () => setDetalle(db.movs.find(m => m.id === it.id)),
+    onClick: () => {
+      if (it.tipo !== "ahorro") setDetalle(db.movs.find(m => m.id === it.id));
+    },
     primera: i === 0
   }))), /*#__PURE__*/React.createElement(Boton, {
     onClick: exportar,
@@ -3001,7 +3085,7 @@ function FormMov({
 }) {
   const [f, setF] = useState({
     ...mov,
-    monto: mov.monto === "" ? "" : String(mov.monto)
+    monto: textoDeNum(mov.monto)
   });
   const [ciaNueva, setCiaNueva] = useState("");
   const set = (k, v) => setF(p => ({
@@ -3010,8 +3094,8 @@ function FormMov({
   }));
   const cats = f.tipo === "ingreso" ? CAT_INGRESO : CAT_GASTO;
   const esTarjeta = f.medio === "tarjeta";
-  const valorCuota = esTarjeta && Number(f.cuotas) > 1 ? Number(f.monto || 0) / Number(f.cuotas) : 0;
-  const valido = Number(f.monto) > 0 && f.fecha && (!esTarjeta || f.tarjetaId);
+  const valorCuota = esTarjeta && Number(f.cuotas) > 1 ? aNumero(f.monto) / Number(f.cuotas) : 0;
+  const valido = aNumero(f.monto) > 0 && f.fecha && (!esTarjeta || f.tarjetaId);
   const listaCias = Array.from(new Set([...(db.cias || []), ...CIAS_SUGERIDAS]));
   return /*#__PURE__*/React.createElement(Modal, {
     onClose: onCancel,
@@ -3059,11 +3143,11 @@ function FormMov({
       marginRight: 6
     }
   }, "$"), /*#__PURE__*/React.createElement("input", {
-    type: "number",
+    type: "text",
     inputMode: "decimal",
     autoFocus: true,
     value: f.monto,
-    onChange: e => set("monto", e.target.value),
+    onChange: e => set("monto", conMiles(e.target.value)),
     placeholder: "0",
     style: {
       border: "none",
@@ -3248,7 +3332,7 @@ function FormMov({
     disabled: !valido,
     onClick: () => onSave({
       ...f,
-      monto: Number(f.monto),
+      monto: aNumero(f.monto),
       cuotas: esTarjeta ? Number(f.cuotas) : 1,
       recurrente: esTarjeta ? false : !!f.recurrente
     }),
@@ -3266,7 +3350,8 @@ function FormTarjeta({
   onDelete
 }) {
   const [f, setF] = useState({
-    ...tj
+    ...tj,
+    limite: textoDeNum(tj.limite)
   });
   const set = (k, v) => setF(p => ({
     ...p,
@@ -3324,9 +3409,10 @@ function FormTarjeta({
   })))), /*#__PURE__*/React.createElement(Campo, {
     label: "Límite (opcional)"
   }, /*#__PURE__*/React.createElement("input", {
-    type: "number",
+    type: "text",
+    inputMode: "decimal",
     value: f.limite,
-    onChange: e => set("limite", e.target.value),
+    onChange: e => set("limite", conMiles(e.target.value)),
     placeholder: "0",
     style: inputStyle
   })), /*#__PURE__*/React.createElement("div", {
@@ -3343,7 +3429,10 @@ function FormTarjeta({
   }, "Cancelar"), /*#__PURE__*/React.createElement(Boton, {
     tone: "solid",
     disabled: !f.nombre,
-    onClick: () => onSave(f),
+    onClick: () => onSave({
+      ...f,
+      limite: aNumero(f.limite) || ""
+    }),
     style: {
       flex: 2
     }
