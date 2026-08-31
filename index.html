@@ -21,7 +21,6 @@
   body { overscroll-behavior-y: none; }
   #root { min-height: 100vh; }
 
-  /* utilidades de layout usadas por la app */
   .flex { display: flex; }
   .items-center { align-items: center; }
   .items-start { align-items: flex-start; }
@@ -36,13 +35,6 @@
   input[type="number"] { -moz-appearance: textfield; }
   input[type="date"] { -webkit-appearance: none; appearance: none; min-height: 44px; }
 
-  /* barra inferior flotante, separada del borde y de la barra de gestos */
-  .barra-nav {
-    position: fixed; left: 0; right: 0; bottom: 0; z-index: 15;
-    padding: 0 14px calc(16px + env(safe-area-inset-bottom));
-    pointer-events: none;
-  }
-
   .cargando { display: flex; align-items: center; justify-content: center;
     min-height: 60vh; font-family: system-ui, sans-serif; color: #6B776F; font-size: 14px; }
   @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
@@ -54,7 +46,7 @@
 <script>
 /* Actualizador: al abrir, compara con la versión publicada y se refresca solo. */
 (function () {
-  var VERSION = "542d9cfd59";
+  var VERSION = "06756afd9b";
   window.__PLATA_VERSION__ = VERSION;
   var base = location.pathname;
   try {
@@ -2932,8 +2924,9 @@ function Ajustes({
   onClose
 }) {
   const [confirmar, setConfirmar] = useState(false);
+  const [copia, setCopia] = useState(null); // contenido leído del archivo
   const [aviso, setAviso] = useState("");
-  const fileRef = useRef(null);
+  const archivoRef = useRef(null);
   const fijos = db.movs.filter(m => m.recurrente);
   const exportarTodo = () => {
     const filas = [["SECCIÓN", "Fecha", "Detalle", "Compañía/Dónde", "Categoría/Tipo", "Medio/TNA", "Cuotas", "Monto"]];
@@ -2948,9 +2941,24 @@ function Ajustes({
     db.objetivos.forEach(o => filas.push(["Meta", o.fecha || "", o.nombre, "", "", "", "", `${Math.round(aportadoDe(o))} de ${o.meta}`]));
     bajarCSV(filas, `plata-completo-${hoyStr()}.csv`);
   };
+
+  /* --- Copia de seguridad: guardar --- */
   const guardarCopia = () => {
+    const paquete = {
+      app: "plata",
+      formato: 1,
+      fecha: hoyStr(),
+      datos: {
+        tarjetas: db.tarjetas,
+        movs: db.movs,
+        inversiones: db.inversiones,
+        objetivos: db.objetivos,
+        cias: db.cias,
+        juego: db.juego
+      }
+    };
     try {
-      const url = URL.createObjectURL(new Blob([JSON.stringify(db)], {
+      const url = URL.createObjectURL(new Blob([JSON.stringify(paquete)], {
         type: "application/json"
       }));
       const a = document.createElement("a");
@@ -2958,26 +2966,78 @@ function Ajustes({
       a.download = `plata-copia-${hoyStr()}.json`;
       a.click();
       URL.revokeObjectURL(url);
-    } catch (e) {/* nada */}
+      setAviso("Copia descargada. Guardala en el mail o en la nube para tenerla a mano.");
+    } catch (e) {
+      setAviso("No se pudo descargar la copia en este navegador.");
+    }
   };
-  const restaurar = e => {
+
+  /* --- Copia de seguridad: leer el archivo elegido --- */
+  const leerArchivo = e => {
     const file = e.target.files && e.target.files[0];
+    e.target.value = "";
     if (!file) return;
+    setAviso("");
     const fr = new FileReader();
     fr.onload = () => {
       try {
-        const d = JSON.parse(fr.result);
+        const j = JSON.parse(fr.result);
+        const d = j && j.datos ? j.datos : j;
         if (!d || !Array.isArray(d.movs)) throw new Error("formato");
-        setDb({
-          ...VACIO,
-          ...d
+        setCopia({
+          fecha: j && j.fecha ? j.fecha : null,
+          datos: {
+            tarjetas: Array.isArray(d.tarjetas) ? d.tarjetas : [],
+            movs: d.movs,
+            inversiones: Array.isArray(d.inversiones) ? d.inversiones : [],
+            objetivos: Array.isArray(d.objetivos) ? d.objetivos : [],
+            cias: Array.isArray(d.cias) ? d.cias : [],
+            juego: d.juego || {
+              dias: 0,
+              mejor: 0,
+              ultimo: null
+            }
+          }
         });
-        setAviso("Copia restaurada.");
       } catch (err) {
-        setAviso("Ese archivo no es una copia válida.");
+        setCopia(null);
+        setAviso("Ese archivo no es una copia de Plata. Tiene que ser el .json que bajaste con “Guardar copia”.");
       }
     };
+    fr.onerror = () => setAviso("No se pudo leer el archivo.");
     fr.readAsText(file);
+  };
+
+  /* --- Aplicar: reemplazar todo o sumar lo que falte --- */
+  const aplicarCopia = modo => {
+    const c = copia.datos;
+    if (modo === "reemplazar") {
+      setDb({
+        ...VACIO,
+        ...c
+      });
+      setAviso("Listo, quedaron cargados los datos de la copia.");
+      setCopia(null);
+      return;
+    }
+    const unir = (actuales, nuevos) => {
+      const ids = new Set(actuales.map(x => x.id));
+      return [...actuales, ...nuevos.filter(x => !ids.has(x.id))];
+    };
+    setDb(d => ({
+      ...d,
+      tarjetas: unir(d.tarjetas, c.tarjetas),
+      movs: unir(d.movs, c.movs),
+      inversiones: unir(d.inversiones, c.inversiones),
+      objetivos: unir(d.objetivos, c.objetivos),
+      cias: Array.from(new Set([...(d.cias || []), ...c.cias])),
+      juego: {
+        ...d.juego,
+        mejor: Math.max(d.juego.mejor || 0, c.juego.mejor || 0)
+      }
+    }));
+    setAviso("Sumé lo que faltaba. No se duplicó nada de lo que ya tenías.");
+    setCopia(null);
   };
   return /*#__PURE__*/React.createElement(Modal, {
     onClose: onClose,
@@ -3045,6 +3105,108 @@ function Ajustes({
     }
   }, "Con la TNA que cargás, sin capitalizar: el rendimiento por mes es la doceava parte del anual y el diario la trescentésima sexagésima quinta parte. Sirve para comparar opciones entre sí. La app no se conecta al mercado ni sabe cuánto vale hoy un bono o una acción.")), /*#__PURE__*/React.createElement(Panel, {
     style: {
+      marginBottom: 12,
+      borderColor: C.inv
+    }
+  }, /*#__PURE__*/React.createElement(Eyebrow, {
+    style: {
+      marginBottom: 8,
+      color: C.inv
+    }
+  }, "Cambiar de celular"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 13.5,
+      color: C.muted,
+      lineHeight: 1.55,
+      marginBottom: 14
+    }
+  }, "Tus datos viven en este teléfono. Para pasarlos a otro: acá bajás la copia, la mandás al teléfono nuevo (por mail o WhatsApp), abrís la app allá y la cargás con “Traer una copia”."), /*#__PURE__*/React.createElement(Boton, {
+    onClick: guardarCopia,
+    tone: "solid",
+    style: {
+      width: "100%",
+      marginBottom: 8
+    }
+  }, "Guardar copia de todo"), /*#__PURE__*/React.createElement(Boton, {
+    onClick: () => archivoRef.current && archivoRef.current.click(),
+    style: {
+      width: "100%"
+    }
+  }, "Traer una copia"), /*#__PURE__*/React.createElement("input", {
+    ref: archivoRef,
+    type: "file",
+    accept: "application/json,.json",
+    onChange: leerArchivo,
+    style: {
+      display: "none"
+    }
+  }), aviso && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12.5,
+      color: C.inv,
+      marginTop: 12,
+      lineHeight: 1.5
+    }
+  }, aviso), copia && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: 14,
+      border: `1px solid ${C.line}`,
+      borderRadius: 12,
+      padding: 14,
+      background: C.soft
+    }
+  }, /*#__PURE__*/React.createElement(Eyebrow, {
+    style: {
+      marginBottom: 8
+    }
+  }, "La copia trae"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 13,
+      color: C.ink,
+      lineHeight: 1.7,
+      fontFamily: MONO,
+      marginBottom: 4
+    }
+  }, copia.datos.movs.length, " movimientos", /*#__PURE__*/React.createElement("br", null), copia.datos.tarjetas.length, " tarjetas", /*#__PURE__*/React.createElement("br", null), copia.datos.inversiones.length, " inversiones", /*#__PURE__*/React.createElement("br", null), copia.datos.objetivos.length, " metas"), copia.fecha && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11.5,
+      color: C.muted,
+      marginBottom: 12
+    }
+  }, "guardada el ", copia.fecha), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12.5,
+      color: C.muted,
+      lineHeight: 1.5,
+      marginBottom: 12
+    }
+  }, db.movs.length > 0 ? "Ojo: en este teléfono ya tenés datos cargados. Elegí qué hacer." : "Este teléfono está vacío, así que podés traer todo tranquilo."), /*#__PURE__*/React.createElement("div", {
+    className: "flex",
+    style: {
+      gap: 8,
+      marginBottom: 8
+    }
+  }, /*#__PURE__*/React.createElement(Boton, {
+    tone: "solid",
+    onClick: () => aplicarCopia("reemplazar"),
+    style: {
+      flex: 1
+    }
+  }, db.movs.length > 0 ? "Reemplazar todo" : "Cargar todo"), db.movs.length > 0 && /*#__PURE__*/React.createElement(Boton, {
+    onClick: () => aplicarCopia("sumar"),
+    style: {
+      flex: 1
+    }
+  }, "Sumar lo que falte")), /*#__PURE__*/React.createElement(Boton, {
+    onClick: () => {
+      setCopia(null);
+      setAviso("");
+    },
+    style: {
+      width: "100%"
+    }
+  }, "Cancelar"))), /*#__PURE__*/React.createElement(Panel, {
+    style: {
       marginBottom: 12
     }
   }, /*#__PURE__*/React.createElement(Eyebrow, {
@@ -3058,7 +3220,7 @@ function Ajustes({
       marginBottom: 14,
       lineHeight: 1.5
     }
-  }, db.movs.length, " movimientos, ", db.tarjetas.length, " tarjetas, ", db.inversiones.length, " inversiones y ", db.objetivos.length, " metas. Todo queda guardado en este dispositivo. Con “Guardar copia” bajás un archivo que después podés restaurar en otro teléfono o en la compu.", typeof window !== "undefined" && window.__PLATA_VERSION__ ? /*#__PURE__*/React.createElement("div", {
+  }, db.movs.length, " movimientos, ", db.tarjetas.length, " tarjetas, ", db.inversiones.length, " inversiones y ", db.objetivos.length, " metas. Todo queda guardado en este dispositivo.", typeof window !== "undefined" && window.__PLATA_VERSION__ ? /*#__PURE__*/React.createElement("div", {
     style: {
       marginTop: 8,
       fontFamily: MONO,
@@ -3070,37 +3232,7 @@ function Ajustes({
       width: "100%",
       marginBottom: 8
     }
-  }, "Descargar todo en Excel"), /*#__PURE__*/React.createElement("div", {
-    className: "flex",
-    style: {
-      gap: 8,
-      marginBottom: 8
-    }
-  }, /*#__PURE__*/React.createElement(Boton, {
-    onClick: guardarCopia,
-    style: {
-      flex: 1
-    }
-  }, "Guardar copia"), /*#__PURE__*/React.createElement(Boton, {
-    onClick: () => fileRef.current && fileRef.current.click(),
-    style: {
-      flex: 1
-    }
-  }, "Restaurar copia")), /*#__PURE__*/React.createElement("input", {
-    ref: fileRef,
-    type: "file",
-    accept: "application/json,.json",
-    onChange: restaurar,
-    style: {
-      display: "none"
-    }
-  }), aviso && /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 12.5,
-      color: C.inv,
-      marginBottom: 10
-    }
-  }, aviso), !confirmar ? /*#__PURE__*/React.createElement(Boton, {
+  }, "Descargar todo en Excel"), !confirmar ? /*#__PURE__*/React.createElement(Boton, {
     tone: "danger",
     onClick: () => setConfirmar(true),
     style: {
