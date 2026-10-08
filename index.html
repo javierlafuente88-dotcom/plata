@@ -46,7 +46,7 @@
 <script>
 /* Actualizador: al abrir, compara con la versión publicada y se refresca solo. */
 (function () {
-  var VERSION = "06756afd9b";
+  var VERSION = "752cb6bf33";
   window.__PLATA_VERSION__ = VERSION;
   var base = location.pathname;
   try {
@@ -195,6 +195,88 @@ const aNumero = v => {
   return isNaN(n) ? 0 : n;
 };
 const soloTasa = v => String(v).replace(/[^\d,]/g, "").replace(/,(?=.*,)/g, "");
+
+/* ====================== Sincronización con Google Sheets ======================
+   Cada registro lleva "mod": el momento en que se tocó por última vez.
+   Al sincronizar gana el más nuevo, venga del celular o de la planilla.
+   Lo borrado se anota aparte para que no vuelva a aparecer. */
+const ahora = () => Date.now();
+const sellar = r => ({
+  ...r,
+  mod: ahora()
+});
+const TABLAS = ["movs", "tarjetas", "inversiones", "objetivos"];
+function fusionarTabla(locales, remotos, borrados, tabla) {
+  const porId = new Map();
+  (remotos || []).forEach(r => {
+    if (r && r.id) porId.set(r.id, r);
+  });
+  (locales || []).forEach(r => {
+    if (!r || !r.id) return;
+    const act = porId.get(r.id);
+    if (!act || (r.mod || 1) > (act.mod || 1)) porId.set(r.id, r);
+  });
+  (borrados || []).forEach(b => {
+    if (b.tabla !== tabla) return;
+    const reg = porId.get(b.id);
+    if (reg && (b.mod || 1) >= (reg.mod || 1)) porId.delete(b.id);
+  });
+  return Array.from(porId.values());
+}
+function fusionarBorrados(a, b) {
+  const m = new Map();
+  [...(a || []), ...(b || [])].forEach(x => {
+    if (!x || !x.id || !x.tabla) return;
+    const k = x.tabla + "::" + x.id;
+    if (!m.has(k) || (x.mod || 1) > (m.get(k).mod || 1)) m.set(k, x);
+  });
+  return Array.from(m.values());
+}
+
+/* Manda lo local, recibe lo fusionado. */
+async function sincronizar(db) {
+  const url = (db.sync && db.sync.url || "").trim();
+  if (!url) throw new Error("Todavía no conectaste la planilla.");
+  const cuerpo = {
+    datos: {
+      movs: db.movs,
+      tarjetas: db.tarjetas,
+      inversiones: db.inversiones,
+      objetivos: db.objetivos,
+      borrados: db.borrados || []
+    }
+  };
+  const r = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "text/plain;charset=utf-8"
+    },
+    body: JSON.stringify(cuerpo),
+    redirect: "follow"
+  });
+  if (!r.ok) throw new Error("La planilla respondió con un error (" + r.status + ").");
+  let j;
+  try {
+    j = JSON.parse(await r.text());
+  } catch (e) {
+    throw new Error("La dirección no devolvió datos de Plata. Revisá que sea la del script publicado.");
+  }
+  if (!j.ok) throw new Error(j.error || "La planilla rechazó los datos.");
+  const borrados = fusionarBorrados(db.borrados, j.borrados);
+  const salida = {
+    ...db,
+    borrados,
+    sync: {
+      ...db.sync,
+      ultima: ahora()
+    }
+  };
+  TABLAS.forEach(t => {
+    salida[t] = fusionarTabla(db[t], j[t], borrados, t);
+  });
+  salida.cias = Array.from(new Set([...(db.cias || []), ...salida.movs.map(m => m.cia).filter(Boolean)]));
+  return salida;
+}
 
 /* --- cuotas de tarjeta --- */
 function primeraCuota(mov, tj) {
@@ -452,6 +534,12 @@ const VACIO = {
     dias: 0,
     mejor: 0,
     ultimo: null
+  },
+  borrados: [],
+  sync: {
+    url: "",
+    ultima: null,
+    auto: true
   }
 };
 function cargar() {
@@ -727,6 +815,11 @@ function App() {
   const [detalle, setDetalle] = useState(null);
   const [ajustes, setAjustes] = useState(false);
   const [festejo, setFestejo] = useState(null);
+  const [sync, setSync] = useState({
+    estado: "quieto",
+    msg: ""
+  }); // quieto | yendo | ok | error
+  const autoHecho = useRef(false);
   const listo = useRef(false);
   const logrosPrev = useRef([]);
   useEffect(() => {
@@ -744,6 +837,45 @@ function App() {
       logrosPrev.current = ahora.map(l => l.id);
     }
   }, [db]);
+
+  // Al abrir, si hay planilla conectada, sincroniza sola una vez.
+  useEffect(() => {
+    if (!db || autoHecho.current) return;
+    autoHecho.current = true;
+    if (!(db.sync && db.sync.url && db.sync.auto !== false)) return;
+    setSync({
+      estado: "yendo",
+      msg: ""
+    });
+    sincronizar(db).then(nuevo => {
+      setDb(nuevo);
+      setSync({
+        estado: "ok",
+        msg: "Al día con la planilla."
+      });
+    }).catch(e => setSync({
+      estado: "error",
+      msg: e.message
+    }));
+  }, [db]);
+  const correrSync = () => {
+    setSync({
+      estado: "yendo",
+      msg: ""
+    });
+    return sincronizar(db).then(nuevo => {
+      setDb(nuevo);
+      setSync({
+        estado: "ok",
+        msg: "Listo, quedó todo igual en los dos lados."
+      });
+    }).catch(e => {
+      setSync({
+        estado: "error",
+        msg: e.message
+      });
+    });
+  };
   const keyActual = mIdx(hoy.getFullYear(), hoy.getMonth());
   const keyCur = mIdx(cur.y, cur.m);
   const items = useMemo(() => db ? [...itemsDelMes(db, cur.y, cur.m), ...ahorrosDelMes(db, cur.y, cur.m)].sort((a, b) => b._dia - a._dia) : [], [db, cur]);
@@ -798,51 +930,81 @@ function App() {
     ...d,
     juego: actualizarRacha(d.juego)
   });
+  const anotarBorrado = (d, id, tabla) => ({
+    ...d,
+    borrados: [...(d.borrados || []), {
+      id,
+      tabla,
+      mod: ahora()
+    }]
+  });
   const guardarMov = mov => {
+    const m = sellar(mov);
     setDb(d => {
-      const existe = d.movs.some(m => m.id === mov.id);
-      const cias = mov.cia && !d.cias.includes(mov.cia) ? [...d.cias, mov.cia] : d.cias;
+      const existe = d.movs.some(x => x.id === m.id);
+      const cias = m.cia && !d.cias.includes(m.cia) ? [...d.cias, m.cia] : d.cias;
       return tocar({
         ...d,
         cias,
-        movs: existe ? d.movs.map(m => m.id === mov.id ? mov : m) : [mov, ...d.movs]
+        movs: existe ? d.movs.map(x => x.id === m.id ? m : x) : [m, ...d.movs]
       });
     });
     setForm(null);
     setDetalle(null);
   };
   const borrarMov = id => {
-    setDb(d => ({
+    setDb(d => anotarBorrado({
       ...d,
       movs: d.movs.filter(m => m.id !== id)
-    }));
+    }, id, "movs"));
     setDetalle(null);
   };
-  const guardarTarjeta = tj => setDb(d => ({
-    ...d,
-    tarjetas: d.tarjetas.some(t => t.id === tj.id) ? d.tarjetas.map(t => t.id === tj.id ? tj : t) : [...d.tarjetas, tj]
-  }));
-  const borrarTarjeta = id => setDb(d => ({
-    ...d,
-    tarjetas: d.tarjetas.filter(t => t.id !== id),
-    movs: d.movs.filter(m => m.tarjetaId !== id)
-  }));
-  const guardarInv = inv => setDb(d => tocar({
-    ...d,
-    inversiones: d.inversiones.some(i => i.id === inv.id) ? d.inversiones.map(i => i.id === inv.id ? inv : i) : [...d.inversiones, inv]
-  }));
-  const borrarInv = id => setDb(d => ({
+  const guardarTarjeta = tj0 => {
+    const tj = sellar(tj0);
+    setDb(d => ({
+      ...d,
+      tarjetas: d.tarjetas.some(t => t.id === tj.id) ? d.tarjetas.map(t => t.id === tj.id ? tj : t) : [...d.tarjetas, tj]
+    }));
+  };
+  const borrarTarjeta = id => setDb(d => {
+    const movsFuera = d.movs.filter(m => m.tarjetaId === id).map(m => ({
+      id: m.id,
+      tabla: "movs",
+      mod: ahora()
+    }));
+    return {
+      ...d,
+      tarjetas: d.tarjetas.filter(t => t.id !== id),
+      movs: d.movs.filter(m => m.tarjetaId !== id),
+      borrados: [...(d.borrados || []), {
+        id,
+        tabla: "tarjetas",
+        mod: ahora()
+      }, ...movsFuera]
+    };
+  });
+  const guardarInv = inv0 => {
+    const inv = sellar(inv0);
+    setDb(d => tocar({
+      ...d,
+      inversiones: d.inversiones.some(i => i.id === inv.id) ? d.inversiones.map(i => i.id === inv.id ? inv : i) : [...d.inversiones, inv]
+    }));
+  };
+  const borrarInv = id => setDb(d => anotarBorrado({
     ...d,
     inversiones: d.inversiones.filter(i => i.id !== id)
-  }));
-  const guardarMeta = o => setDb(d => tocar({
-    ...d,
-    objetivos: d.objetivos.some(x => x.id === o.id) ? d.objetivos.map(x => x.id === o.id ? o : x) : [...d.objetivos, o]
-  }));
-  const borrarMeta = id => setDb(d => ({
+  }, id, "inversiones"));
+  const guardarMeta = o0 => {
+    const o = sellar(o0);
+    setDb(d => tocar({
+      ...d,
+      objetivos: d.objetivos.some(x => x.id === o.id) ? d.objetivos.map(x => x.id === o.id ? o : x) : [...d.objetivos, o]
+    }));
+  };
+  const borrarMeta = id => setDb(d => anotarBorrado({
     ...d,
     objetivos: d.objetivos.filter(o => o.id !== id)
-  }));
+  }, id, "objetivos"));
   const TABS = [{
     id: "inicio",
     label: "Inicio"
@@ -984,7 +1146,10 @@ function App() {
     cur: cur,
     keyActual: keyActual,
     setDetalle: setDetalle,
-    setTab: setTab
+    setTab: setTab,
+    sync: sync,
+    correrSync: correrSync,
+    setAjustes: setAjustes
   }), tab === "tarjetas" && /*#__PURE__*/React.createElement(Tarjetas, {
     db: db,
     cur: cur,
@@ -1110,7 +1275,10 @@ function App() {
   }), ajustes && /*#__PURE__*/React.createElement(Ajustes, {
     db: db,
     setDb: setDb,
-    onClose: () => setAjustes(false)
+    onClose: () => setAjustes(false),
+    sync: sync,
+    correrSync: correrSync,
+    setSync: setSync
   }), festejo && /*#__PURE__*/React.createElement("div", {
     onClick: () => setFestejo(null),
     style: {
@@ -1160,6 +1328,79 @@ function App() {
       width: "100%"
     }
   }, "Seguir"))));
+}
+
+/* ============================ Barra de sincronización ============================ */
+function BarraSync({
+  db,
+  sync,
+  correrSync,
+  setAjustes
+}) {
+  const conectada = !!(db.sync && db.sync.url);
+  const ultima = db.sync && db.sync.ultima;
+  const cuando = () => {
+    if (!ultima) return "nunca";
+    const min = Math.round((Date.now() - ultima) / 60000);
+    if (min < 1) return "recién";
+    if (min < 60) return `hace ${min} min`;
+    const hs = Math.round(min / 60);
+    if (hs < 24) return `hace ${hs} h`;
+    return `hace ${Math.round(hs / 24)} días`;
+  };
+  if (!conectada) {
+    return /*#__PURE__*/React.createElement(Panel, {
+      onClick: () => setAjustes(true),
+      style: {
+        marginBottom: 12,
+        borderStyle: "dashed",
+        cursor: "pointer"
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      className: "flex items-center justify-between"
+    }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement(Eyebrow, null, "Planilla de Google"), /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 13,
+        color: C.muted,
+        marginTop: 4
+      }
+    }, "Sin conectar. Tocá para cargar desde la compu también.")), /*#__PURE__*/React.createElement("span", {
+      style: {
+        color: C.muted,
+        fontSize: 18
+      }
+    }, "›")));
+  }
+  const color = sync.estado === "error" ? C.out : sync.estado === "ok" ? C.in : C.muted;
+  return /*#__PURE__*/React.createElement(Panel, {
+    style: {
+      marginBottom: 12,
+      padding: "12px 14px"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center justify-between",
+    style: {
+      gap: 10
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      minWidth: 0
+    }
+  }, /*#__PURE__*/React.createElement(Eyebrow, null, "Planilla de Google"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12.5,
+      color,
+      marginTop: 3,
+      lineHeight: 1.4
+    }
+  }, sync.estado === "yendo" ? "Sincronizando…" : sync.msg || `Última vez ${cuando()}`)), /*#__PURE__*/React.createElement(Boton, {
+    onClick: correrSync,
+    disabled: sync.estado === "yendo",
+    style: {
+      padding: "9px 14px",
+      flexShrink: 0
+    }
+  }, sync.estado === "yendo" ? "…" : "Sincronizar")));
 }
 
 /* ============================ Avisos ============================ */
@@ -1240,7 +1481,10 @@ function Inicio({
   cur,
   keyActual,
   setDetalle,
-  setTab
+  setTab,
+  sync,
+  correrSync,
+  setAjustes
 }) {
   const maxProy = Math.max(1, ...proyeccion.map(p => p.tot));
   const juego = estadoJuego(db);
@@ -1282,6 +1526,11 @@ function Inicio({
     db: db,
     keyActual: keyActual,
     setTab: setTab
+  }), /*#__PURE__*/React.createElement(BarraSync, {
+    db: db,
+    sync: sync,
+    correrSync: correrSync,
+    setAjustes: setAjustes
   }), /*#__PURE__*/React.createElement(Panel, {
     style: {
       padding: 20
@@ -2921,12 +3170,17 @@ function bajarCSV(filas, nombre) {
 function Ajustes({
   db,
   setDb,
-  onClose
+  onClose,
+  sync,
+  correrSync,
+  setSync
 }) {
   const [confirmar, setConfirmar] = useState(false);
   const [copia, setCopia] = useState(null); // contenido leído del archivo
   const [aviso, setAviso] = useState("");
   const archivoRef = useRef(null);
+  const [urlEdit, setUrlEdit] = useState(db.sync && db.sync.url || "");
+  const [editandoUrl, setEditandoUrl] = useState(!(db.sync && db.sync.url));
   const fijos = db.movs.filter(m => m.recurrente);
   const exportarTodo = () => {
     const filas = [["SECCIÓN", "Fecha", "Detalle", "Compañía/Dónde", "Categoría/Tipo", "Medio/TNA", "Cuotas", "Monto"]];
@@ -2954,7 +3208,8 @@ function Ajustes({
         inversiones: db.inversiones,
         objetivos: db.objetivos,
         cias: db.cias,
-        juego: db.juego
+        juego: db.juego,
+        borrados: db.borrados || []
       }
     };
     try {
@@ -3012,10 +3267,12 @@ function Ajustes({
   const aplicarCopia = modo => {
     const c = copia.datos;
     if (modo === "reemplazar") {
-      setDb({
+      setDb(d => ({
         ...VACIO,
-        ...c
-      });
+        ...c,
+        sync: d.sync,
+        borrados: d.borrados || []
+      }));
       setAviso("Listo, quedaron cargados los datos de la copia.");
       setCopia(null);
       return;
@@ -3104,6 +3361,135 @@ function Ajustes({
       lineHeight: 1.6
     }
   }, "Con la TNA que cargás, sin capitalizar: el rendimiento por mes es la doceava parte del anual y el diario la trescentésima sexagésima quinta parte. Sirve para comparar opciones entre sí. La app no se conecta al mercado ni sabe cuánto vale hoy un bono o una acción.")), /*#__PURE__*/React.createElement(Panel, {
+    style: {
+      marginBottom: 12,
+      borderColor: C.in
+    }
+  }, /*#__PURE__*/React.createElement(Eyebrow, {
+    style: {
+      marginBottom: 8,
+      color: C.in
+    }
+  }, "Planilla de Google"), !editandoUrl && db.sync && db.sync.url ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 13.5,
+      color: C.muted,
+      lineHeight: 1.55,
+      marginBottom: 12
+    }
+  }, "Conectada. Lo que cargues acá aparece en la planilla y lo que cargues en la planilla aparece acá."), sync && sync.msg && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12.5,
+      color: sync.estado === "error" ? C.out : C.in,
+      marginBottom: 12,
+      lineHeight: 1.5
+    }
+  }, sync.msg), /*#__PURE__*/React.createElement(Boton, {
+    tone: "solid",
+    onClick: correrSync,
+    disabled: sync && sync.estado === "yendo",
+    style: {
+      width: "100%",
+      marginBottom: 8
+    }
+  }, sync && sync.estado === "yendo" ? "Sincronizando…" : "Sincronizar ahora"), /*#__PURE__*/React.createElement("div", {
+    onClick: () => setDb(d => ({
+      ...d,
+      sync: {
+        ...d.sync,
+        auto: !(d.sync.auto !== false)
+      }
+    })),
+    className: "flex items-center",
+    style: {
+      gap: 10,
+      padding: "11px 0",
+      cursor: "pointer"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      width: 18,
+      height: 18,
+      borderRadius: 5,
+      flexShrink: 0,
+      border: `1.5px solid ${db.sync.auto !== false ? C.ink : C.line}`,
+      background: db.sync.auto !== false ? C.ink : "transparent",
+      color: C.paper,
+      fontSize: 12,
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center"
+    }
+  }, db.sync.auto !== false ? "✓" : ""), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 13.5
+    }
+  }, "Sincronizar sola al abrir la app")), /*#__PURE__*/React.createElement(Boton, {
+    onClick: () => {
+      setUrlEdit(db.sync.url);
+      setEditandoUrl(true);
+    },
+    style: {
+      width: "100%"
+    }
+  }, "Cambiar la dirección")) : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 13.5,
+      color: C.muted,
+      lineHeight: 1.55,
+      marginBottom: 12
+    }
+  }, "Pegá acá la dirección que te dio Google al publicar el script. Con eso podés cargar desde el celular o desde la compu, lo que te quede más cómodo."), /*#__PURE__*/React.createElement("input", {
+    value: urlEdit,
+    onChange: e => setUrlEdit(e.target.value),
+    placeholder: "https://script.google.com/macros/s/...",
+    style: {
+      ...inputStyle,
+      fontSize: 13,
+      marginBottom: 10
+    }
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "flex",
+    style: {
+      gap: 8
+    }
+  }, db.sync && db.sync.url && /*#__PURE__*/React.createElement(Boton, {
+    onClick: () => {
+      setUrlEdit(db.sync.url);
+      setEditandoUrl(false);
+    },
+    style: {
+      flex: 1
+    }
+  }, "Cancelar"), /*#__PURE__*/React.createElement(Boton, {
+    tone: "solid",
+    disabled: !/^https:\/\/script\.google\.com\//.test(urlEdit.trim()),
+    onClick: () => {
+      setDb(d => ({
+        ...d,
+        sync: {
+          ...(d.sync || {}),
+          url: urlEdit.trim(),
+          auto: d.sync && d.sync.auto !== false
+        }
+      }));
+      setEditandoUrl(false);
+      if (setSync) setSync({
+        estado: "quieto",
+        msg: "Guardada. Tocá Sincronizar para probarla."
+      });
+    },
+    style: {
+      flex: 2
+    }
+  }, "Conectar")), urlEdit.trim() && !/^https:\/\/script\.google\.com\//.test(urlEdit.trim()) && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: C.out,
+      marginTop: 8,
+      lineHeight: 1.45
+    }
+  }, "Tiene que empezar con https://script.google.com/ — es la que te da Google al publicar, no la de la planilla."))), /*#__PURE__*/React.createElement(Panel, {
     style: {
       marginBottom: 12,
       borderColor: C.inv
@@ -3753,7 +4139,6 @@ function Detalle({
     }
   }, "Eliminar")));
 }
-ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(App));
-</script>
+ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(App));</script>
 </body>
 </html>
