@@ -37,6 +37,11 @@
 
   .cargando { display: flex; align-items: center; justify-content: center;
     min-height: 60vh; font-family: system-ui, sans-serif; color: #6B776F; font-size: 14px; }
+  @keyframes latido {
+    0%   { transform: scale(0.85); opacity: .45; }
+    70%  { transform: scale(1.7);  opacity: 0; }
+    100% { transform: scale(1.7);  opacity: 0; }
+  }
   @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
 </style>
 </head>
@@ -46,7 +51,7 @@
 <script>
 /* Actualizador: al abrir, compara con la versión publicada y se refresca solo. */
 (function () {
-  var VERSION = "752cb6bf33";
+  var VERSION = "f2e4a491a2";
   window.__PLATA_VERSION__ = VERSION;
   var base = location.pathname;
   try {
@@ -99,7 +104,11 @@ const C = {
   // barra inferior
   navLine: "rgba(236,239,234,.13)",
   navOff: "#8FA097",
-  navOn: "#ECEFEA"
+  navOn: "#ECEFEA",
+  verde: "#2F7A5B",
+  ambar: "#C08A1E",
+  rojo: "#A33A3A",
+  apagado: "#9AA69F"
 };
 const MONO = "ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace";
 const SANS = "system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, sans-serif";
@@ -1331,6 +1340,72 @@ function App() {
 }
 
 /* ============================ Barra de sincronización ============================ */
+/* Semáforo: verde al día, ámbar sincronizando o hace rato, rojo si falló, gris sin conectar. */
+function Luz({
+  color,
+  latiendo,
+  tam = 11
+}) {
+  return /*#__PURE__*/React.createElement("span", {
+    style: {
+      position: "relative",
+      display: "inline-flex",
+      width: tam,
+      height: tam,
+      flexShrink: 0
+    }
+  }, latiendo && /*#__PURE__*/React.createElement("span", {
+    style: {
+      position: "absolute",
+      inset: -3,
+      borderRadius: "50%",
+      background: color,
+      opacity: 0.28,
+      animation: "latido 1.1s ease-out infinite"
+    }
+  }), /*#__PURE__*/React.createElement("span", {
+    style: {
+      width: tam,
+      height: tam,
+      borderRadius: "50%",
+      background: color,
+      boxShadow: `0 0 0 2px ${color}22`
+    }
+  }));
+}
+function estadoSemaforo(db, sync) {
+  const conectada = !!(db.sync && db.sync.url);
+  if (!conectada) return {
+    color: C.apagado,
+    texto: "Sin conectar",
+    detalle: "Tocá para cargar desde la compu también."
+  };
+  if (sync.estado === "yendo") return {
+    color: C.ambar,
+    texto: "Sincronizando",
+    latiendo: true
+  };
+  if (sync.estado === "error") return {
+    color: C.rojo,
+    texto: "No pudo sincronizar",
+    detalle: sync.msg
+  };
+  const ultima = db.sync.ultima;
+  if (!ultima) return {
+    color: C.ambar,
+    texto: "Falta sincronizar",
+    detalle: "Tocá Sincronizar para probar la conexión."
+  };
+  const horas = (Date.now() - ultima) / 3600000;
+  if (horas > 24) return {
+    color: C.ambar,
+    texto: "Conectada, desactualizada"
+  };
+  return {
+    color: C.verde,
+    texto: "Conectada y al día"
+  };
+}
 function BarraSync({
   db,
   sync,
@@ -1348,30 +1423,51 @@ function BarraSync({
     if (hs < 24) return `hace ${hs} h`;
     return `hace ${Math.round(hs / 24)} días`;
   };
+  const est = estadoSemaforo(db, sync);
   if (!conectada) {
     return /*#__PURE__*/React.createElement(Panel, {
       onClick: () => setAjustes(true),
       style: {
         marginBottom: 12,
         borderStyle: "dashed",
-        cursor: "pointer"
+        cursor: "pointer",
+        padding: "12px 14px"
       }
     }, /*#__PURE__*/React.createElement("div", {
-      className: "flex items-center justify-between"
-    }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement(Eyebrow, null, "Planilla de Google"), /*#__PURE__*/React.createElement("div", {
+      className: "flex items-center justify-between",
       style: {
-        fontSize: 13,
-        color: C.muted,
-        marginTop: 4
+        gap: 10
       }
-    }, "Sin conectar. Tocá para cargar desde la compu también.")), /*#__PURE__*/React.createElement("span", {
+    }, /*#__PURE__*/React.createElement("div", {
+      className: "flex items-center",
+      style: {
+        gap: 10,
+        minWidth: 0
+      }
+    }, /*#__PURE__*/React.createElement(Luz, {
+      color: est.color
+    }), /*#__PURE__*/React.createElement("div", {
+      style: {
+        minWidth: 0
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 13.5,
+        fontWeight: 600
+      }
+    }, est.texto), /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 11.5,
+        color: C.muted,
+        marginTop: 2
+      }
+    }, est.detalle))), /*#__PURE__*/React.createElement("span", {
       style: {
         color: C.muted,
         fontSize: 18
       }
     }, "›")));
   }
-  const color = sync.estado === "error" ? C.out : sync.estado === "ok" ? C.in : C.muted;
   return /*#__PURE__*/React.createElement(Panel, {
     style: {
       marginBottom: 12,
@@ -1383,17 +1479,36 @@ function BarraSync({
       gap: 10
     }
   }, /*#__PURE__*/React.createElement("div", {
+    onClick: () => setAjustes(true),
+    className: "flex items-center",
+    style: {
+      gap: 10,
+      minWidth: 0,
+      cursor: "pointer"
+    }
+  }, /*#__PURE__*/React.createElement(Luz, {
+    color: est.color,
+    latiendo: est.latiendo
+  }), /*#__PURE__*/React.createElement("div", {
     style: {
       minWidth: 0
     }
-  }, /*#__PURE__*/React.createElement(Eyebrow, null, "Planilla de Google"), /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 12.5,
-      color,
-      marginTop: 3,
-      lineHeight: 1.4
+      fontSize: 13.5,
+      fontWeight: 600,
+      color: est.color
     }
-  }, sync.estado === "yendo" ? "Sincronizando…" : sync.msg || `Última vez ${cuando()}`)), /*#__PURE__*/React.createElement(Boton, {
+  }, est.texto), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11.5,
+      color: C.muted,
+      marginTop: 2,
+      overflow: "hidden",
+      textOverflow: "ellipsis",
+      whiteSpace: "nowrap"
+    }
+  }, est.detalle || sync.estado === "ok" && sync.msg || `Planilla · última vez ${cuando()}`))), /*#__PURE__*/React.createElement(Boton, {
     onClick: correrSync,
     disabled: sync.estado === "yendo",
     style: {
@@ -3371,13 +3486,31 @@ function Ajustes({
       color: C.in
     }
   }, "Planilla de Google"), !editandoUrl && db.sync && db.sync.url ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center",
+    style: {
+      gap: 9,
+      marginBottom: 10
+    }
+  }, /*#__PURE__*/React.createElement(Luz, {
+    color: estadoSemaforo(db, sync || {
+      estado: "quieto"
+    }).color,
+    latiendo: sync && sync.estado === "yendo"
+  }), /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 13.5,
+      fontWeight: 600
+    }
+  }, estadoSemaforo(db, sync || {
+    estado: "quieto"
+  }).texto)), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 13.5,
       color: C.muted,
       lineHeight: 1.55,
       marginBottom: 12
     }
-  }, "Conectada. Lo que cargues acá aparece en la planilla y lo que cargues en la planilla aparece acá."), sync && sync.msg && /*#__PURE__*/React.createElement("div", {
+  }, "Lo que cargues acá aparece en la planilla y lo que cargues en la planilla aparece acá."), sync && sync.msg && /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 12.5,
       color: sync.estado === "error" ? C.out : C.in,
