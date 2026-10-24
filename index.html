@@ -51,7 +51,7 @@
 <script>
 /* Actualizador: al abrir, compara con la versión publicada y se refresca solo. */
 (function () {
-  var VERSION = "d4bb75abdb";
+  var VERSION = "d6f9386825";
   window.__PLATA_VERSION__ = VERSION;
   var base = location.pathname;
   try {
@@ -309,6 +309,45 @@ function cuotasDe(mov, tj) {
   }
   return arr;
 }
+
+/* El resumen que se paga primero, de acá en adelante. */
+function proximoResumen(tj) {
+  const hoy = new Date();
+  const cierre = Number(tj && tj.cierre) || 25;
+  const vence = Number(tj && tj.vence) || 5;
+  /* Si ya pasó el cierre de este mes, el que viene es el del mes próximo. */
+  let d = hoy.getDate() > cierre ? addM(hoy.getFullYear(), hoy.getMonth(), 1) : {
+    y: hoy.getFullYear(),
+    m: hoy.getMonth()
+  };
+  if (vence < cierre) d = addM(d.y, d.m, 1);
+  return {
+    y: d.y,
+    m: d.m,
+    dia: vence
+  };
+}
+
+/* ¿La compra entró después del último cierre? Entonces todavía no la ves facturada. */
+function compradoDespuesDelCierre(mov, tj) {
+  const cierre = Number(tj && tj.cierre) || 25;
+  const [Y, M, D] = mov.fecha.split("-").map(Number);
+  const hoy = new Date();
+  const ultimo = hoy.getDate() > cierre ? {
+    y: hoy.getFullYear(),
+    m: hoy.getMonth(),
+    d: cierre
+  } : (() => {
+    const a = addM(hoy.getFullYear(), hoy.getMonth(), -1);
+    return {
+      y: a.y,
+      m: a.m,
+      d: cierre
+    };
+  })();
+  const comp = Y * 10000 + M * 100 + D;
+  return comp > ultimo.y * 10000 + (ultimo.m + 1) * 100 + ultimo.d;
+}
 function itemsDelMes(db, y, m) {
   const key = mIdx(y, m);
   const out = [];
@@ -383,7 +422,7 @@ function ahorrosDelMes(db, y, m) {
         _monto: Number(inv.monto) || 0,
         _fecha: inv.fecha,
         _dia: D,
-        desc: inv.nombre,
+        desc: inv.nombre || inv.donde,
         cat: "Lo pusiste a invertir"
       });
     }
@@ -575,14 +614,46 @@ function Eyebrow({
   children,
   style
 }) {
+  /* Etiqueta chica, en minúscula: la app habla con una sola voz. */
   return /*#__PURE__*/React.createElement("div", {
     style: {
       fontFamily: SANS,
-      fontSize: 10.5,
-      letterSpacing: "0.14em",
-      textTransform: "uppercase",
+      fontSize: 12.5,
       color: C.muted,
-      fontWeight: 600,
+      fontWeight: 500,
+      ...style
+    }
+  }, children);
+}
+/* Título de panel: una sola voz para toda la app. */
+function Titulo({
+  children,
+  style,
+  nota
+}) {
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginBottom: nota ? 4 : 14,
+      ...style
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 15,
+      fontWeight: 700,
+      letterSpacing: "-0.01em"
+    }
+  }, children));
+}
+function Nota({
+  children,
+  style
+}) {
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12.5,
+      color: C.muted,
+      lineHeight: 1.5,
+      marginBottom: 14,
       ...style
     }
   }, children);
@@ -1812,29 +1883,54 @@ function Inicio({
     style: {
       marginBottom: 12
     }
-  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement(Eyebrow, null, "Nivel ", juego.nivel + 1, " · ", juego.nombreNivel), /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 14.5,
+      fontWeight: 700
+    }
+  }, "Nivel ", juego.nivel + 1, ", ", juego.nombreNivel.toLowerCase()), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 12,
       color: C.muted,
-      marginTop: 4
+      marginTop: 3
     }
-  }, juego.desbloqueados.length, " de ", LOGROS.length, " logros · ", juego.puntos, " puntos")), /*#__PURE__*/React.createElement("div", {
+  }, juego.desbloqueados.length, " de ", LOGROS.length, " logros")), /*#__PURE__*/React.createElement("div", {
     style: {
-      textAlign: "right"
+      textAlign: "right",
+      flexShrink: 0,
+      paddingLeft: 12
     }
-  }, /*#__PURE__*/React.createElement("div", {
+  }, (db.juego.dias || 0) > 0 ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-baseline",
+    style: {
+      gap: 5,
+      justifyContent: "flex-end"
+    }
+  }, /*#__PURE__*/React.createElement("span", {
     style: {
       fontFamily: MONO,
       fontSize: 24,
       fontWeight: 700,
       color: C.gold
     }
-  }, db.juego.dias || 0), /*#__PURE__*/React.createElement("div", {
+  }, db.juego.dias), /*#__PURE__*/React.createElement("span", {
     style: {
-      fontSize: 10.5,
+      fontSize: 12.5,
       color: C.muted
     }
-  }, "días de racha"))), /*#__PURE__*/React.createElement(Barra, {
+  }, db.juego.dias === 1 ? "día" : "días")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11.5,
+      color: C.muted
+    }
+  }, "seguidos cargando")) : /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12.5,
+      color: C.muted,
+      maxWidth: 110,
+      lineHeight: 1.4
+    }
+  }, "Anotá algo hoy y arrancás la racha."))), /*#__PURE__*/React.createElement(Barra, {
     pct: juego.progreso,
     color: C.ink
   })), db.inversiones.length > 0 && /*#__PURE__*/React.createElement(Panel, {
@@ -1844,7 +1940,12 @@ function Inicio({
     onClick: () => setTab("invertir")
   }, /*#__PURE__*/React.createElement("div", {
     className: "flex items-start justify-between"
-  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement(Eyebrow, null, "Tu plata invertida"), /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 15,
+      fontWeight: 700
+    }
+  }, "Tu plata invertida"), /*#__PURE__*/React.createElement("div", {
     style: {
       marginTop: 4
     }
@@ -1863,7 +1964,12 @@ function Inicio({
     style: {
       textAlign: "right"
     }
-  }, /*#__PURE__*/React.createElement(Eyebrow, null, "Rinde por mes"), /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: C.muted
+    }
+  }, "Rinde por mes"), /*#__PURE__*/React.createElement("div", {
     style: {
       marginTop: 4,
       fontFamily: MONO,
@@ -1877,7 +1983,12 @@ function Inicio({
     }
   }, /*#__PURE__*/React.createElement("div", {
     className: "flex items-start justify-between"
-  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement(Eyebrow, null, "Ya está comprometido"), /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 15,
+      fontWeight: 700
+    }
+  }, "Ya está comprometido"), /*#__PURE__*/React.createElement("div", {
     style: {
       marginTop: 4
     }
@@ -1886,21 +1997,18 @@ function Inicio({
     size: 26,
     weight: 600,
     color: C.gold
-  }))), /*#__PURE__*/React.createElement("div", {
+  })))), /*#__PURE__*/React.createElement(Nota, {
     style: {
-      textAlign: "right",
-      fontSize: 11,
-      color: C.muted,
-      lineHeight: 1.5,
-      maxWidth: 130
+      marginTop: 10,
+      marginBottom: 4
     }
-  }, "lo que falta pagar de todas las cuotas, desde este mes en adelante")), /*#__PURE__*/React.createElement("div", {
+  }, "Lo que falta pagar de todas las cuotas, de este mes en adelante."), /*#__PURE__*/React.createElement("div", {
     className: "flex",
     style: {
       gap: 3,
       alignItems: "flex-end",
       height: 74,
-      marginTop: 18
+      marginTop: 14
     }
   }, proyeccion.map((p, i) => /*#__PURE__*/React.createElement("div", {
     key: i,
@@ -1914,8 +2022,9 @@ function Inicio({
   }, /*#__PURE__*/React.createElement("div", {
     style: {
       fontFamily: MONO,
-      fontSize: 8.5,
-      color: p.tot > 0 ? C.muted : "transparent"
+      fontSize: 9.5,
+      fontWeight: 600,
+      color: i === 0 && p.tot > 0 ? C.gold : "transparent"
     }
   }, p.tot > 0 ? fmtK(p.tot) : "0"), /*#__PURE__*/React.createElement("div", {
     style: {
@@ -1930,16 +2039,12 @@ function Inicio({
       fontSize: 9,
       color: C.muted
     }
-  }, MES_CORTO[p.m]))))), tarjetasMes.length > 0 && /*#__PURE__*/React.createElement(Panel, {
+  }, i % 2 === 0 ? MES_CORTO[p.m] : ""))))), tarjetasMes.length > 0 && /*#__PURE__*/React.createElement(Panel, {
     style: {
       marginTop: 12
     },
     onClick: () => setTab("tarjetas")
-  }, /*#__PURE__*/React.createElement(Eyebrow, {
-    style: {
-      marginBottom: 12
-    }
-  }, "Resúmenes de ", MESES[cur.m]), tarjetasMes.map(t => /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement(Titulo, null, "Resúmenes de ", MESES[cur.m]), tarjetasMes.map(t => /*#__PURE__*/React.createElement("div", {
     key: t.id,
     className: "flex items-center justify-between",
     style: {
@@ -2064,7 +2169,8 @@ function Fila({
   it,
   db,
   onClick,
-  primera
+  primera,
+  sinFecha
 }) {
   const tj = it.medio === "tarjeta" ? db.tarjetas.find(t => t.id === it.tarjetaId) : null;
   const esIng = it.tipo === "ingreso";
@@ -2096,7 +2202,7 @@ function Fila({
       color: C.muted,
       marginTop: 2
     }
-  }, esAho ? it.cat : /*#__PURE__*/React.createElement(React.Fragment, null, esIng && it.cia ? it.cia + " · " : "", it.cat ? it.cat + " · " : "", tj ? tj.nombre + " " : "", it._cuota ? `cuota ${it._cuota}` : it._rec ? "fijo mensual" : MEDIOS.find(m => m.id === it.medio)?.label))), /*#__PURE__*/React.createElement("div", {
+  }, esAho ? it.cat : [esIng ? it.cia : null, it.cat, tj ? tj.nombre : null, it._cuota ? `cuota ${it._cuota}` : it._rec ? "fijo mensual" : (MEDIOS.find(m => m.id === it.medio) || {}).label].filter(Boolean).join(" · "))), /*#__PURE__*/React.createElement("div", {
     style: {
       textAlign: "right",
       whiteSpace: "nowrap"
@@ -2109,7 +2215,7 @@ function Fila({
       color: esIng ? C.in : esAho ? C.inv : C.ink,
       fontVariantNumeric: "tabular-nums"
     }
-  }, esIng ? "+" : "−", fmt(it._monto).slice(1)), /*#__PURE__*/React.createElement("div", {
+  }, esIng ? "+" : "−", fmt(it._monto).slice(1)), sinFecha ? null : /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 11,
       color: C.muted,
@@ -2154,10 +2260,24 @@ function Tarjetas({
         resta: (cs.length - pagadas) * cs[0].monto
       });
     }
+    /* Lo que ya cerró y hay que pagar en el próximo vencimiento. */
+    const sig = proximoResumen(t);
+    let proximo = 0,
+      juntando = 0;
+    for (const mv of compras) {
+      const cs = cuotasDe(mv, t);
+      const enSig = cs.find(c => mIdx(c.y, c.m) === mIdx(sig.y, sig.m));
+      if (enSig) proximo += enSig.monto;
+      /* Compras hechas después del último cierre: todavía no las ves en ningún resumen. */
+      if (compradoDespuesDelCierre(mv, t)) juntando += Number(mv.monto) / Math.max(1, Number(mv.cuotas) || 1);
+    }
     return {
       t,
       resumen,
-      activas: activas.sort((a, b) => b.resta - a.resta),
+      sig,
+      proximo,
+      juntando,
+      activas: activas.filter(x => x.total > 1).sort((a, b) => b.resta - a.resta),
       pendiente: activas.reduce((a, x) => a + x.resta, 0)
     };
   });
@@ -2177,7 +2297,9 @@ function Tarjetas({
     onClick: () => setEdit(nueva())
   }, "Agregar tarjeta")), datos.map(({
     t,
-    resumen,
+    sig,
+    proximo,
+    juntando,
     activas,
     pendiente
   }) => /*#__PURE__*/React.createElement(Panel, {
@@ -2217,29 +2339,70 @@ function Tarjetas({
       fontWeight: 600
     }
   }, "editar")), /*#__PURE__*/React.createElement("div", {
-    className: "flex",
     style: {
-      gap: 20,
       marginTop: 16
     }
-  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement(Eyebrow, null, "Resumen de ", MES_CORTO[cur.m]), /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: C.muted
+    }
+  }, "Pagás el ", sig.dia, " de ", MESES[sig.m]), /*#__PURE__*/React.createElement("div", {
     style: {
       marginTop: 3
     }
   }, /*#__PURE__*/React.createElement(Monto, {
-    v: resumen,
-    size: 22,
+    v: proximo,
+    size: 28,
+    weight: 600,
+    color: C.gold
+  }))), /*#__PURE__*/React.createElement("div", {
+    className: "flex",
+    style: {
+      gap: 20,
+      marginTop: 14,
+      paddingTop: 14,
+      borderTop: `1px solid ${C.line}`
+    }
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: C.muted
+    }
+  }, "Se está juntando"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: 3
+    }
+  }, /*#__PURE__*/React.createElement(Monto, {
+    v: juntando,
+    size: 16,
     weight: 600
-  }))), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement(Eyebrow, null, "Falta pagar"), /*#__PURE__*/React.createElement("div", {
+  })), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11,
+      color: C.muted,
+      marginTop: 2
+    }
+  }, "cierra el ", t.cierre)), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: C.muted
+    }
+  }, "Falta pagar en total"), /*#__PURE__*/React.createElement("div", {
     style: {
       marginTop: 3
     }
   }, /*#__PURE__*/React.createElement(Monto, {
     v: pendiente,
-    size: 22,
-    weight: 600,
-    color: C.gold
-  })))), t.limite ? /*#__PURE__*/React.createElement("div", {
+    size: 16,
+    weight: 600
+  })), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11,
+      color: C.muted,
+      marginTop: 2
+    }
+  }, "todas las cuotas"))), t.limite ? /*#__PURE__*/React.createElement("div", {
     style: {
       marginTop: 14
     }
@@ -2258,17 +2421,20 @@ function Tarjetas({
     style: {
       padding: "4px 16px 12px"
     }
-  }, /*#__PURE__*/React.createElement(Eyebrow, {
+  }, /*#__PURE__*/React.createElement("div", {
     style: {
-      padding: "12px 0 4px"
+      fontSize: 13.5,
+      fontWeight: 700,
+      padding: "12px 0 6px"
     }
-  }, "Cuotas en curso (", activas.length, ")"), activas.length === 0 && /*#__PURE__*/React.createElement("div", {
+  }, activas.length > 0 ? `Compras en cuotas (${activas.length})` : "Compras en cuotas"), activas.length === 0 && /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 13,
       color: C.muted,
-      padding: "8px 0 10px"
+      padding: "8px 0 10px",
+      lineHeight: 1.5
     }
-  }, "Sin cuotas pendientes. Limpia."), activas.map(({
+  }, "No tenés nada en cuotas con esta tarjeta."), activas.map(({
     mv,
     pagadas,
     total,
@@ -2304,10 +2470,9 @@ function Tarjetas({
     style: {
       fontSize: 11.5,
       color: C.muted,
-      marginTop: 2,
-      fontFamily: MONO
+      marginTop: 2
     }
-  }, pagadas, "/", total, " pagadas · ", fmt(valor), " por mes")), /*#__PURE__*/React.createElement("div", {
+  }, "Te quedan ", total - pagadas, " de ", total, " · ", fmt(valor), " por mes")), /*#__PURE__*/React.createElement("div", {
     style: {
       textAlign: "right"
     }
@@ -2409,7 +2574,12 @@ function Inversiones({
     style: {
       padding: 20
     }
-  }, /*#__PURE__*/React.createElement(Eyebrow, null, "Vale hoy"), /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 13,
+      color: C.muted
+    }
+  }, "Vale hoy"), /*#__PURE__*/React.createElement("div", {
     style: {
       margin: "6px 0 4px"
     }
@@ -2445,7 +2615,12 @@ function Inversiones({
     style: {
       flex: 1
     }
-  }, /*#__PURE__*/React.createElement(Eyebrow, null, x.l), /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: C.muted
+    }
+  }, x.l), /*#__PURE__*/React.createElement("div", {
     style: {
       fontFamily: MONO,
       fontSize: 15,
@@ -2453,9 +2628,11 @@ function Inversiones({
       color: C.in,
       marginTop: 4
     }
-  }, fmt(x.v)))))), /*#__PURE__*/React.createElement(Eyebrow, {
+  }, fmt(x.v)))))), /*#__PURE__*/React.createElement("div", {
     style: {
-      margin: "20px 2px 10px"
+      fontSize: 15,
+      fontWeight: 700,
+      margin: "22px 2px 11px"
     }
   }, "Cuál te rinde más"), /*#__PURE__*/React.createElement(Panel, {
     style: {
@@ -2792,8 +2969,10 @@ function FormInversion({
       padding: 14,
       marginBottom: 14
     }
-  }, /*#__PURE__*/React.createElement(Eyebrow, {
+  }, /*#__PURE__*/React.createElement("div", {
     style: {
+      fontSize: 13.5,
+      fontWeight: 700,
       color: C.inv,
       marginBottom: 10
     }
@@ -2931,8 +3110,10 @@ function Metas({
       lineHeight: 1.55,
       marginBottom: 16
     }
-  }, "Una meta es una plata que estás juntando para algo puntual. Vos vas cargando los aportes a mano y ves cuánto te falta."), /*#__PURE__*/React.createElement(Eyebrow, {
+  }, "Una meta es una plata que estás juntando para algo puntual. Vos vas cargando los aportes a mano y ves cuánto te falta."), /*#__PURE__*/React.createElement("div", {
     style: {
+      fontSize: 13.5,
+      fontWeight: 700,
       marginBottom: 10
     }
   }, "Arrancá con alguna de estas"), /*#__PURE__*/React.createElement("div", {
@@ -3052,11 +3233,13 @@ function Metas({
       width: "100%",
       marginTop: 4
     }
-  }, "+ Nueva meta"), /*#__PURE__*/React.createElement(Eyebrow, {
+  }, "+ Nueva meta"), /*#__PURE__*/React.createElement("div", {
     style: {
-      margin: "24px 2px 10px"
+      fontSize: 15,
+      fontWeight: 700,
+      margin: "26px 2px 11px"
     }
-  }, "Logros · ", juego.desbloqueados.length, " de ", LOGROS.length), /*#__PURE__*/React.createElement(Panel, {
+  }, "Logros, ", juego.desbloqueados.length, " de ", LOGROS.length), /*#__PURE__*/React.createElement(Panel, {
     style: {
       padding: "6px 16px"
     }
@@ -3412,7 +3595,8 @@ function Movimientos({
     onClick: () => {
       if (it.tipo !== "ahorro") setDetalle(db.movs.find(m => m.id === it.id));
     },
-    primera: i === 0
+    primera: i === 0,
+    sinFecha: true
   }))))), /*#__PURE__*/React.createElement(Boton, {
     onClick: exportar,
     style: {
@@ -3572,11 +3756,7 @@ function Ajustes({
     style: {
       marginBottom: 12
     }
-  }, /*#__PURE__*/React.createElement(Eyebrow, {
-    style: {
-      marginBottom: 12
-    }
-  }, "Gastos fijos mensuales"), fijos.length === 0 ? /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement(Titulo, null, "Gastos fijos mensuales"), fijos.length === 0 ? /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 13.5,
       color: C.muted,
@@ -3605,10 +3785,8 @@ function Ajustes({
     style: {
       marginBottom: 12
     }
-  }, /*#__PURE__*/React.createElement(Eyebrow, {
-    style: {
-      marginBottom: 8
-    }
+  }, /*#__PURE__*/React.createElement(Titulo, {
+    nota: true
   }, "Cómo se calculan las cuotas"), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 13.5,
@@ -3619,10 +3797,8 @@ function Ajustes({
     style: {
       marginBottom: 12
     }
-  }, /*#__PURE__*/React.createElement(Eyebrow, {
-    style: {
-      marginBottom: 8
-    }
+  }, /*#__PURE__*/React.createElement(Titulo, {
+    nota: true
   }, "Cómo se calculan los rendimientos"), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 13.5,
@@ -3634,9 +3810,9 @@ function Ajustes({
       marginBottom: 12,
       borderColor: C.in
     }
-  }, /*#__PURE__*/React.createElement(Eyebrow, {
+  }, /*#__PURE__*/React.createElement(Titulo, {
+    nota: true,
     style: {
-      marginBottom: 8,
       color: C.in
     }
   }, "Planilla de Google"), !editandoUrl && db.sync && db.sync.url ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
@@ -3781,9 +3957,9 @@ function Ajustes({
       marginBottom: 12,
       borderColor: C.inv
     }
-  }, /*#__PURE__*/React.createElement(Eyebrow, {
+  }, /*#__PURE__*/React.createElement(Titulo, {
+    nota: true,
     style: {
-      marginBottom: 8,
       color: C.inv
     }
   }, "Cambiar de celular"), /*#__PURE__*/React.createElement("div", {
@@ -3828,8 +4004,10 @@ function Ajustes({
       padding: 14,
       background: C.soft
     }
-  }, /*#__PURE__*/React.createElement(Eyebrow, {
+  }, /*#__PURE__*/React.createElement("div", {
     style: {
+      fontSize: 13.5,
+      fontWeight: 700,
       marginBottom: 8
     }
   }, "La copia trae"), /*#__PURE__*/React.createElement("div", {
@@ -3882,11 +4060,7 @@ function Ajustes({
     style: {
       marginBottom: 12
     }
-  }, /*#__PURE__*/React.createElement(Eyebrow, {
-    style: {
-      marginBottom: 10
-    }
-  }, "Tus datos"), /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement(Titulo, null, "Tus datos"), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 13,
       color: C.muted,
@@ -5229,7 +5403,12 @@ function Detalle({
     }
   }, /*#__PURE__*/React.createElement("div", {
     className: "flex items-center justify-between"
-  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement(Eyebrow, null, mov.tipo === "ingreso" ? "Ingreso" : "Gasto", " total"), /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12.5,
+      color: C.muted
+    }
+  }, mov.tipo === "ingreso" ? "Ingreso" : "Gasto", " total"), /*#__PURE__*/React.createElement("div", {
     style: {
       marginTop: 4
     }
@@ -5254,7 +5433,12 @@ function Detalle({
     style: {
       marginBottom: 12
     }
-  }, /*#__PURE__*/React.createElement(Eyebrow, null, "Plan de cuotas"), /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 14,
+      fontWeight: 700
+    }
+  }, "Plan de cuotas"), /*#__PURE__*/React.createElement("div", {
     style: {
       fontFamily: MONO,
       fontSize: 12,
