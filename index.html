@@ -51,7 +51,7 @@
 <script>
 /* Actualizador: al abrir, compara con la versión publicada y se refresca solo. */
 (function () {
-  var VERSION = "047fb8dfcc";
+  var VERSION = "7882116d51";
   window.__PLATA_VERSION__ = VERSION;
   var base = location.pathname;
   try {
@@ -964,16 +964,18 @@ function App() {
     let ing = 0,
       gas = 0,
       tarj = 0,
-      aho = 0;
+      aho = 0,
+      fijo = 0;
     for (const it of items) {
-      if (it.tipo === "ingreso") ing += it._monto;else if (it.tipo === "ahorro") aho += it._monto;else if (it.medio === "tarjeta") tarj += it._monto;else gas += it._monto;
+      if (it.tipo === "ingreso") ing += it._monto;else if (it.tipo === "ahorro") aho += it._monto;else if (it.medio === "tarjeta") tarj += it._monto;else if (it._rec) fijo += it._monto;else gas += it._monto;
     }
     return {
       ing,
       gas,
       tarj,
       aho,
-      saldo: ing - gas - aho
+      fijo,
+      saldo: ing - gas - fijo - aho
     };
   }, [items]);
   const pend = useMemo(() => db ? cuotasPendientes(db, keyActual) : [], [db, keyActual]);
@@ -1430,10 +1432,11 @@ function RepartoDelMes({
   const {
     ing,
     gas,
+    fijo,
     aho,
     tarj
   } = totales;
-  const movido = gas + aho;
+  const movido = gas + fijo + aho;
   if (ing === 0 && movido === 0) {
     return /*#__PURE__*/React.createElement("div", {
       style: {
@@ -1446,7 +1449,11 @@ function RepartoDelMes({
   const base = Math.max(ing, movido, 1);
   const libre = Math.max(0, ing - movido);
   const tramos = [{
-    l: "Salió",
+    l: "Fijos",
+    v: fijo,
+    c: C.apagado
+  }, {
+    l: "Día a día",
     v: gas,
     c: C.out
   }, {
@@ -1475,20 +1482,25 @@ function RepartoDelMes({
     },
     title: t.l
   }))), /*#__PURE__*/React.createElement("div", {
-    className: "flex",
     style: {
-      gap: 14,
-      marginTop: 14,
-      flexWrap: "wrap"
+      display: "grid",
+      gridTemplateColumns: "1fr 1fr",
+      gap: "13px 14px",
+      marginTop: 15
     }
   }, /*#__PURE__*/React.createElement(DatoChico, {
     etiqueta: "Entró",
     valor: ing,
     color: C.in
   }), gas > 0 && /*#__PURE__*/React.createElement(DatoChico, {
-    etiqueta: "Salió",
+    etiqueta: "Día a día",
     valor: gas,
     color: C.out,
+    punto: true
+  }), fijo > 0 && /*#__PURE__*/React.createElement(DatoChico, {
+    etiqueta: "Fijos",
+    valor: fijo,
+    color: C.apagado,
     punto: true
   }), aho > 0 && /*#__PURE__*/React.createElement(DatoChico, {
     etiqueta: "Guardaste",
@@ -1817,6 +1829,8 @@ function Inicio({
   correrSync,
   setAjustes
 }) {
+  /* Lo que cargó a mano este mes: los fijos se repiten solos y tienen su lugar. */
+  const cargados = useMemo(() => items.filter(i => !i._rec), [items]);
   const maxProy = Math.max(1, ...proyeccion.map(p => p.tot));
   /* El primer mes con plata: ése es el que lleva el número y el acento. */
   const proxCuota = proyeccion.findIndex(p => p.tot > 0);
@@ -2146,7 +2160,7 @@ function Inicio({
       fontSize: 15,
       fontWeight: 700
     }
-  }, "Lo último que cargaste"), items.length > 7 && /*#__PURE__*/React.createElement("button", {
+  }, "Lo último que cargaste"), cargados.length > 7 && /*#__PURE__*/React.createElement("button", {
     onClick: () => setTab("movs"),
     style: {
       border: "none",
@@ -2157,7 +2171,7 @@ function Inicio({
       cursor: "pointer",
       padding: 0
     }
-  }, "Ver los ", items.length)), items.length === 0 ? /*#__PURE__*/React.createElement(Panel, {
+  }, "Ver los ", cargados.length)), cargados.length === 0 ? /*#__PURE__*/React.createElement(Panel, {
     style: {
       textAlign: "center",
       padding: 28,
@@ -2169,7 +2183,7 @@ function Inicio({
     style: {
       padding: "4px 16px"
     }
-  }, items.slice(0, 7).map((it, i) => /*#__PURE__*/React.createElement(Fila, {
+  }, cargados.slice(0, 7).map((it, i) => /*#__PURE__*/React.createElement(Fila, {
     key: it._id,
     it: it,
     db: db,
@@ -3475,16 +3489,24 @@ function Movimientos({
 }) {
   const [filtro, setFiltro] = useState("todos");
   const [q, setQ] = useState("");
+  const buscado = i => {
+    if (!q) return true;
+    const t = `${i.desc || ""} ${i.cat || ""} ${i.cia || ""}`.toLowerCase();
+    return t.includes(q.toLowerCase());
+  };
+
+  /* Los fijos se repiten todos los meses y no son algo que cargaste ese día:
+     van en su propio bloque para que el día a día se lea limpio. */
+  const fijosDelMes = items.filter(i => i._rec && buscado(i));
+  const totalFijos = fijosDelMes.reduce((a, i) => a + i._monto, 0);
   const lista = items.filter(i => {
+    if (filtro === "fijos") return i._rec && buscado(i);
+    if (i._rec) return false;
     if (filtro === "ingresos" && i.tipo !== "ingreso") return false;
     if (filtro === "gastos" && i.tipo !== "gasto") return false;
     if (filtro === "tarjeta" && i.medio !== "tarjeta") return false;
     if (filtro === "ahorro" && i.tipo !== "ahorro") return false;
-    if (q) {
-      const t = `${i.desc || ""} ${i.cat || ""} ${i.cia || ""}`.toLowerCase();
-      if (!t.includes(q.toLowerCase())) return false;
-    }
-    return true;
+    return buscado(i);
   });
   const total = lista.reduce((a, i) => a + (i.tipo === "ingreso" ? i._monto : -i._monto), 0);
 
@@ -3507,7 +3529,8 @@ function Movimientos({
       return {
         clave,
         titulo,
-        items,
+        /* Dentro del día, primero lo que entró y después lo que salió. */
+        items: items.slice().sort((a, b) => (a.tipo === "ingreso" ? 0 : 1) - (b.tipo === "ingreso" ? 0 : 1)),
         neto: items.reduce((a, i) => a + (i.tipo === "ingreso" ? i._monto : -i._monto), 0)
       };
     });
@@ -3554,7 +3577,62 @@ function Movimientos({
     active: filtro === "ahorro",
     onClick: () => setFiltro("ahorro"),
     color: C.inv
-  }, "Ahorro")), /*#__PURE__*/React.createElement("div", {
+  }, "Ahorro"), fijosDelMes.length > 0 && /*#__PURE__*/React.createElement(Chip, {
+    active: filtro === "fijos",
+    onClick: () => setFiltro("fijos"),
+    color: C.apagado
+  }, "Fijos")), filtro !== "fijos" && fijosDelMes.length > 0 && /*#__PURE__*/React.createElement(Panel, {
+    style: {
+      marginBottom: 14,
+      padding: "13px 16px"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center justify-between",
+    style: {
+      gap: 10
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      minWidth: 0
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 13.5,
+      fontWeight: 700
+    }
+  }, "Gastos fijos de ", MESES[cur.m]), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11.5,
+      color: C.muted,
+      marginTop: 2,
+      overflow: "hidden",
+      textOverflow: "ellipsis",
+      whiteSpace: "nowrap"
+    }
+  }, fijosDelMes.map(f => f.desc || f.cat).join(", "))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      textAlign: "right",
+      flexShrink: 0
+    }
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement(Monto, {
+    v: totalFijos,
+    size: 16,
+    color: C.apagado,
+    weight: 600
+  })), /*#__PURE__*/React.createElement("button", {
+    onClick: () => setFiltro("fijos"),
+    style: {
+      border: "none",
+      background: "transparent",
+      color: C.inv,
+      fontSize: 12,
+      fontWeight: 600,
+      cursor: "pointer",
+      padding: "4px 0 0",
+      display: "block",
+      marginLeft: "auto"
+    }
+  }, "ver los ", fijosDelMes.length)))), /*#__PURE__*/React.createElement("div", {
     className: "flex items-center justify-between",
     style: {
       padding: "2px 2px 12px"
@@ -3564,7 +3642,7 @@ function Movimientos({
       fontSize: 13,
       color: C.muted
     }
-  }, lista.length, " ", lista.length === 1 ? "movimiento" : "movimientos"), /*#__PURE__*/React.createElement(Monto, {
+  }, filtro === "fijos" ? `${lista.length} ${lista.length === 1 ? "gasto fijo" : "gastos fijos"}` : `${lista.length} ${lista.length === 1 ? "movimiento" : "movimientos"} cargados`), /*#__PURE__*/React.createElement(Monto, {
     v: total,
     size: 14,
     color: total >= 0 ? C.in : C.out,
@@ -3577,7 +3655,7 @@ function Movimientos({
       fontSize: 14,
       lineHeight: 1.5
     }
-  }, q ? `No encontré nada con "${q}".` : "No hay nada con ese filtro.") : porDia.map(grupo => /*#__PURE__*/React.createElement("div", {
+  }, q ? `No encontré nada con "${q}".` : filtro === "todos" ? `No cargaste nada a mano en ${MESES[cur.m]}. Los fijos se repiten solos.` : "No hay nada con ese filtro.") : porDia.map(grupo => /*#__PURE__*/React.createElement("div", {
     key: grupo.clave,
     style: {
       marginBottom: 14
@@ -4199,17 +4277,19 @@ function Analisis({
       let ing = 0,
         gas = 0,
         aho = 0,
-        tarj = 0;
+        tarj = 0,
+        fijo = 0;
       its.forEach(it => {
-        if (it.tipo === "ingreso") ing += it._monto;else if (it.tipo === "ahorro") aho += it._monto;else if (it.medio === "tarjeta") tarj += it._monto;else gas += it._monto;
+        if (it.tipo === "ingreso") ing += it._monto;else if (it.tipo === "ahorro") aho += it._monto;else if (it.medio === "tarjeta") tarj += it._monto;else if (it._rec) fijo += it._monto;else gas += it._monto;
       });
       out.push({
         ...d,
         ing,
         gas,
+        fijo,
         aho,
         tarj,
-        saldo: ing - gas - aho
+        saldo: ing - gas - fijo - aho
       });
     }
     return out;
@@ -4220,7 +4300,8 @@ function Analisis({
   const promedioIng = conDatos.length ? conDatos.reduce((a, m) => a + m.ing, 0) / conDatos.length : 0;
   const promedioGas = conDatos.length ? conDatos.reduce((a, m) => a + m.gas, 0) / conDatos.length : 0;
   const promedioTarj = conDatos.length ? conDatos.reduce((a, m) => a + m.tarj, 0) / conDatos.length : 0;
-  const tope = Math.max(1, ...meses.map(m => Math.max(m.ing, m.gas + m.tarj)));
+  const promedioFijo = conDatos.length ? conDatos.reduce((a, m) => a + m.fijo, 0) / conDatos.length : 0;
+  const tope = Math.max(1, ...meses.map(m => Math.max(m.ing, m.gas + m.fijo + m.tarj)));
 
   /* De dónde viene la plata, en los seis meses */
   const porCia = useMemo(() => {
@@ -4283,7 +4364,7 @@ function Analisis({
       color: C.muted,
       marginBottom: 18
     }
-  }, "Entradas arriba, salidas abajo. En dorado, lo que se fue en cuotas de tarjeta."), /*#__PURE__*/React.createElement("div", {
+  }, "Entradas arriba, salidas abajo. En gris los fijos, en dorado las cuotas de tarjeta."), /*#__PURE__*/React.createElement("div", {
     className: "flex",
     style: {
       gap: 5,
@@ -4339,6 +4420,14 @@ function Analisis({
     }), /*#__PURE__*/React.createElement("div", {
       style: {
         width: "100%",
+        height: `${m.fijo / tope * 100}%`,
+        background: C.apagado,
+        opacity: esteEs ? 1 : 0.42,
+        minHeight: m.fijo > 0 ? 3 : 0
+      }
+    }), /*#__PURE__*/React.createElement("div", {
+      style: {
+        width: "100%",
         height: `${m.tarj / tope * 100}%`,
         background: C.gold,
         opacity: esteEs ? 1 : 0.42,
@@ -4371,11 +4460,17 @@ function Analisis({
     mejorEsMas: true,
     color: C.in
   }), /*#__PURE__*/React.createElement(Comparacion, {
-    titulo: "Salió de la cuenta",
+    titulo: "Día a día",
     hoy: esteMes.gas,
     antes: mesAnterior.gas,
     pct: varGas,
     color: C.out
+  }), (esteMes.fijo > 0 || mesAnterior.fijo > 0) && /*#__PURE__*/React.createElement(Comparacion, {
+    titulo: "Gastos fijos",
+    hoy: esteMes.fijo,
+    antes: mesAnterior.fijo,
+    pct: pctVar(esteMes.fijo, mesAnterior.fijo),
+    color: C.apagado
   }), (esteMes.tarj > 0 || mesAnterior.tarj > 0) && /*#__PURE__*/React.createElement(Comparacion, {
     titulo: "Cuotas de tarjeta",
     hoy: esteMes.tarj,
@@ -4428,7 +4523,7 @@ function Analisis({
       color: C.muted,
       marginBottom: 3
     }
-  }, "Sale por mes"), /*#__PURE__*/React.createElement(Monto, {
+  }, "Día a día"), /*#__PURE__*/React.createElement(Monto, {
     v: promedioGas,
     size: 19,
     color: C.out,
@@ -4439,12 +4534,31 @@ function Analisis({
       color: C.muted,
       marginTop: 2
     }
-  }, "sin tarjeta"))), promedioTarj > 0 && /*#__PURE__*/React.createElement("div", {
-    className: "flex items-center justify-between",
+  }, "lo que cargás a mano"))), (promedioFijo > 0 || promedioTarj > 0) && /*#__PURE__*/React.createElement("div", {
     style: {
       marginTop: 14,
       paddingTop: 12,
-      borderTop: `1px solid ${C.line}`,
+      borderTop: `1px solid ${C.line}`
+    }
+  }, promedioFijo > 0 && /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center justify-between",
+    style: {
+      gap: 10,
+      marginBottom: promedioTarj > 0 ? 8 : 0
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12.5,
+      color: C.muted
+    }
+  }, "Gastos fijos, por mes"), /*#__PURE__*/React.createElement(Monto, {
+    v: promedioFijo,
+    size: 15,
+    color: C.apagado,
+    weight: 600
+  })), promedioTarj > 0 && /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center justify-between",
+    style: {
       gap: 10
     }
   }, /*#__PURE__*/React.createElement("div", {
@@ -4452,12 +4566,12 @@ function Analisis({
       fontSize: 12.5,
       color: C.muted
     }
-  }, "De tarjeta, por mes"), /*#__PURE__*/React.createElement(Monto, {
+  }, "Cuotas de tarjeta, por mes"), /*#__PURE__*/React.createElement(Monto, {
     v: promedioTarj,
     size: 15,
     color: C.gold,
     weight: 600
-  })), promedioIng > 0 && /*#__PURE__*/React.createElement("div", {
+  }))), promedioIng > 0 && /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 12.5,
       color: C.muted,
@@ -4466,7 +4580,7 @@ function Analisis({
       borderTop: `1px solid ${C.line}`,
       paddingTop: 12
     }
-  }, promedioGas + promedioTarj <= promedioIng ? `De cada 100 pesos que entran, se te van ${Math.round((promedioGas + promedioTarj) / promedioIng * 100)} contando la tarjeta.` : "En promedio gastás más de lo que entra. Mirá los meses en rojo arriba.")), porCia.length > 0 && /*#__PURE__*/React.createElement(Panel, {
+  }, promedioGas + promedioFijo + promedioTarj <= promedioIng ? `De cada 100 pesos que entran, se te van ${Math.round((promedioGas + promedioFijo + promedioTarj) / promedioIng * 100)} sumando fijos y tarjeta.` : "En promedio gastás más de lo que entra. Mirá los meses en rojo arriba.")), porCia.length > 0 && /*#__PURE__*/React.createElement(Panel, {
     style: {
       marginTop: 12
     }
