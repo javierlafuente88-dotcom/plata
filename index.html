@@ -51,7 +51,7 @@
 <script>
 /* Actualizador: al abrir, compara con la versión publicada y se refresca solo. */
 (function () {
-  var VERSION = "f2e4a491a2";
+  var VERSION = "d4bb75abdb";
   window.__PLATA_VERSION__ = VERSION;
   var base = location.pathname;
   try {
@@ -947,6 +947,23 @@ function App() {
       mod: ahora()
     }]
   });
+
+  /* Carga varios movimientos de una (los que vienen de un PDF). */
+  const importarMovs = lista => {
+    const nuevos = lista.map(m => sellar({
+      ...m,
+      id: uid()
+    }));
+    setDb(d => {
+      const cias = Array.from(new Set([...(d.cias || []), ...nuevos.map(m => m.cia).filter(Boolean)]));
+      return tocar({
+        ...d,
+        cias,
+        movs: [...nuevos, ...d.movs]
+      });
+    });
+    return nuevos.length;
+  };
   const guardarMov = mov => {
     const m = sellar(mov);
     setDb(d => {
@@ -1018,17 +1035,14 @@ function App() {
     id: "inicio",
     label: "Inicio"
   }, {
+    id: "movs",
+    label: "Movimientos"
+  }, {
     id: "tarjetas",
     label: "Tarjetas"
   }, {
-    id: "invertir",
-    label: "Invertir"
-  }, {
-    id: "metas",
-    label: "Metas"
-  }, {
-    id: "movs",
-    label: "Movs"
+    id: "finanzas",
+    label: "Finanzas"
   }];
   return /*#__PURE__*/React.createElement("div", {
     style: {
@@ -1166,19 +1180,20 @@ function App() {
     onGuardar: guardarTarjeta,
     onBorrar: borrarTarjeta,
     setDetalle: setDetalle
-  }), tab === "invertir" && /*#__PURE__*/React.createElement(Inversiones, {
-    db: db,
-    onGuardar: guardarInv,
-    onBorrar: borrarInv
-  }), tab === "metas" && /*#__PURE__*/React.createElement(Metas, {
-    db: db,
-    onGuardar: guardarMeta,
-    onBorrar: borrarMeta
   }), tab === "movs" && /*#__PURE__*/React.createElement(Movimientos, {
     db: db,
     items: items,
     setDetalle: setDetalle,
     cur: cur
+  }), tab === "finanzas" && /*#__PURE__*/React.createElement(Finanzas, {
+    db: db,
+    cur: cur,
+    keyActual: keyActual,
+    onGuardarInv: guardarInv,
+    onBorrarInv: borrarInv,
+    onGuardarMeta: guardarMeta,
+    onBorrarMeta: borrarMeta,
+    onImportar: importarMovs
   })), /*#__PURE__*/React.createElement("button", {
     onClick: () => setForm({
       id: uid(),
@@ -1337,6 +1352,128 @@ function App() {
       width: "100%"
     }
   }, "Seguir"))));
+}
+
+/* La barra del mes: una sola línea que muestra a dónde fue cada peso que entró. */
+function RepartoDelMes({
+  totales
+}) {
+  const {
+    ing,
+    gas,
+    aho,
+    tarj
+  } = totales;
+  const movido = gas + aho;
+  if (ing === 0 && movido === 0) {
+    return /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 13,
+        color: C.muted,
+        lineHeight: 1.5
+      }
+    }, "Todavía no hay movimientos este mes.");
+  }
+  const base = Math.max(ing, movido, 1);
+  const libre = Math.max(0, ing - movido);
+  const tramos = [{
+    l: "Salió",
+    v: gas,
+    c: C.out
+  }, {
+    l: "Guardaste",
+    v: aho,
+    c: C.inv
+  }, {
+    l: "Libre",
+    v: libre,
+    c: C.in
+  }].filter(t => t.v > 0);
+  return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    className: "flex",
+    style: {
+      height: 10,
+      borderRadius: 5,
+      overflow: "hidden",
+      background: C.soft,
+      border: `1px solid ${C.line}`
+    }
+  }, tramos.map(t => /*#__PURE__*/React.createElement("div", {
+    key: t.l,
+    style: {
+      width: `${t.v / base * 100}%`,
+      background: t.c
+    },
+    title: t.l
+  }))), /*#__PURE__*/React.createElement("div", {
+    className: "flex",
+    style: {
+      gap: 14,
+      marginTop: 14,
+      flexWrap: "wrap"
+    }
+  }, /*#__PURE__*/React.createElement(DatoChico, {
+    etiqueta: "Entró",
+    valor: ing,
+    color: C.in
+  }), gas > 0 && /*#__PURE__*/React.createElement(DatoChico, {
+    etiqueta: "Salió",
+    valor: gas,
+    color: C.out,
+    punto: true
+  }), aho > 0 && /*#__PURE__*/React.createElement(DatoChico, {
+    etiqueta: "Guardaste",
+    valor: aho,
+    color: C.inv,
+    punto: true
+  })), tarj > 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12.5,
+      color: C.muted,
+      marginTop: 12,
+      paddingTop: 12,
+      borderTop: `1px solid ${C.line}`,
+      lineHeight: 1.5
+    }
+  }, "De lo que salió, ", fmt(tarj), " es de tarjeta."), aho > 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: C.muted,
+      marginTop: 8,
+      lineHeight: 1.45
+    }
+  }, "Lo que apartaste para metas e inversiones ya está descontado."));
+}
+function DatoChico({
+  etiqueta,
+  valor,
+  color,
+  punto
+}) {
+  return /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center",
+    style: {
+      gap: 6
+    }
+  }, punto && /*#__PURE__*/React.createElement("span", {
+    style: {
+      width: 7,
+      height: 7,
+      borderRadius: "50%",
+      background: color,
+      flexShrink: 0
+    }
+  }), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11.5,
+      color: C.muted
+    }
+  }, etiqueta), /*#__PURE__*/React.createElement(Monto, {
+    v: valor,
+    size: 15,
+    color: color,
+    weight: 600
+  })));
 }
 
 /* ============================ Barra de sincronización ============================ */
@@ -1650,66 +1787,23 @@ function Inicio({
     style: {
       padding: 20
     }
-  }, /*#__PURE__*/React.createElement(Eyebrow, null, "Balance del mes"), /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("div", {
     style: {
-      margin: "8px 0 16px"
+      fontSize: 13,
+      color: C.muted
+    }
+  }, "Te queda en ", MESES[cur.m]), /*#__PURE__*/React.createElement("div", {
+    style: {
+      margin: "5px 0 18px"
     }
   }, /*#__PURE__*/React.createElement(Monto, {
     v: totales.saldo,
     size: 38,
     weight: 600,
     color: totales.saldo >= 0 ? C.ink : C.out
-  })), /*#__PURE__*/React.createElement("div", {
-    className: "flex",
-    style: {
-      gap: 12,
-      flexWrap: "wrap"
-    }
-  }, [{
-    l: "Entró",
-    v: totales.ing,
-    c: C.in
-  }, {
-    l: "Salió",
-    v: totales.gas,
-    c: C.out
-  }, {
-    l: "Tarjetas",
-    v: totales.tarj,
-    c: C.gold
-  }, {
-    l: "Guardaste",
-    v: totales.aho,
-    c: C.inv
-  }].map(x => /*#__PURE__*/React.createElement("div", {
-    key: x.l,
-    style: {
-      width: "calc(50% - 6px)"
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      height: 4,
-      background: x.c,
-      borderRadius: 2,
-      marginBottom: 8
-    }
-  }), /*#__PURE__*/React.createElement(Eyebrow, null, x.l), /*#__PURE__*/React.createElement("div", {
-    style: {
-      marginTop: 3
-    }
-  }, /*#__PURE__*/React.createElement(Monto, {
-    v: x.v,
-    size: 16,
-    color: x.c,
-    weight: 600
-  }))))), totales.aho > 0 && /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 11.5,
-      color: C.muted,
-      marginTop: 14,
-      lineHeight: 1.45
-    }
-  }, "El balance ya tiene descontado lo que apartaste para metas e inversiones.")), /*#__PURE__*/React.createElement(Panel, {
+  })), /*#__PURE__*/React.createElement(RepartoDelMes, {
+    totales: totales
+  })), /*#__PURE__*/React.createElement(Panel, {
     style: {
       marginTop: 12
     }
@@ -1866,59 +1960,48 @@ function Inicio({
     v: t.tot,
     size: 16,
     weight: 600
-  })))), porCia.length > 0 && /*#__PURE__*/React.createElement(Panel, {
-    style: {
-      marginTop: 12
-    }
-  }, /*#__PURE__*/React.createElement(Eyebrow, {
-    style: {
-      marginBottom: 14
-    }
-  }, "De dónde vinieron tus ingresos"), porCia.map(([cia, v]) => /*#__PURE__*/React.createElement("div", {
-    key: cia,
-    style: {
-      marginBottom: 12
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "flex items-center justify-between",
-    style: {
-      marginBottom: 5
-    }
-  }, /*#__PURE__*/React.createElement("span", {
-    style: {
-      fontSize: 13.5
-    }
-  }, cia), /*#__PURE__*/React.createElement("span", {
-    style: {
-      fontFamily: MONO,
-      fontSize: 13,
-      color: C.muted
-    }
-  }, fmt(v), " · ", Math.round(v / porCia.reduce((a, x) => a + x[1], 0) * 100), "%")), /*#__PURE__*/React.createElement(Barra, {
-    pct: v / maxCia * 100,
-    color: C.in,
-    alto: 5
   })))), porCat.length > 0 && /*#__PURE__*/React.createElement(Panel, {
     style: {
       marginTop: 12
     }
-  }, /*#__PURE__*/React.createElement(Eyebrow, {
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-baseline justify-between",
     style: {
       marginBottom: 14
     }
-  }, "En qué se te fue"), porCat.map(([cat, v]) => /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 15,
+      fontWeight: 700
+    }
+  }, "Lo que más pesó"), /*#__PURE__*/React.createElement("button", {
+    onClick: () => setTab("finanzas"),
+    style: {
+      border: "none",
+      background: "transparent",
+      color: C.inv,
+      fontSize: 12.5,
+      fontWeight: 600,
+      cursor: "pointer",
+      padding: 0
+    }
+  }, "Ver todo")), porCat.slice(0, 4).map(([cat, v], i) => /*#__PURE__*/React.createElement("div", {
     key: cat,
     style: {
-      marginBottom: 12
+      marginBottom: i === Math.min(3, porCat.length - 1) ? 0 : 12
     }
   }, /*#__PURE__*/React.createElement("div", {
     className: "flex items-center justify-between",
     style: {
-      marginBottom: 5
+      marginBottom: 5,
+      gap: 10
     }
   }, /*#__PURE__*/React.createElement("span", {
     style: {
-      fontSize: 13.5
+      fontSize: 13.5,
+      overflow: "hidden",
+      textOverflow: "ellipsis",
+      whiteSpace: "nowrap"
     }
   }, cat), /*#__PURE__*/React.createElement(Monto, {
     v: v,
@@ -1932,22 +2015,40 @@ function Inicio({
     style: {
       marginTop: 22
     }
-  }, /*#__PURE__*/React.createElement(Eyebrow, {
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-baseline justify-between",
     style: {
       marginBottom: 10
     }
-  }, "Últimos movimientos"), items.length === 0 ? /*#__PURE__*/React.createElement(Panel, {
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 15,
+      fontWeight: 700
+    }
+  }, "Lo último que cargaste"), items.length > 7 && /*#__PURE__*/React.createElement("button", {
+    onClick: () => setTab("movs"),
+    style: {
+      border: "none",
+      background: "transparent",
+      color: C.inv,
+      fontSize: 12.5,
+      fontWeight: 600,
+      cursor: "pointer",
+      padding: 0
+    }
+  }, "Ver los ", items.length)), items.length === 0 ? /*#__PURE__*/React.createElement(Panel, {
     style: {
       textAlign: "center",
       padding: 28,
       color: C.muted,
-      fontSize: 14
+      fontSize: 14,
+      lineHeight: 1.5
     }
-  }, "Todavía no cargaste nada en ", MESES[cur.m], ". Tocá el + para arrancar.") : /*#__PURE__*/React.createElement(Panel, {
+  }, "Todavía no cargaste nada en ", MESES[cur.m], ".", /*#__PURE__*/React.createElement("br", null), "Tocá el + para arrancar.") : /*#__PURE__*/React.createElement(Panel, {
     style: {
       padding: "4px 16px"
     }
-  }, items.slice(0, 6).map((it, i) => /*#__PURE__*/React.createElement(Fila, {
+  }, items.slice(0, 7).map((it, i) => /*#__PURE__*/React.createElement(Fila, {
     key: it._id,
     it: it,
     db: db,
@@ -3187,7 +3288,31 @@ function Movimientos({
     return true;
   });
   const total = lista.reduce((a, i) => a + (i.tipo === "ingreso" ? i._monto : -i._monto), 0);
-  const soloMovs = it => it.tipo !== "ahorro";
+
+  /* Agrupo por día: con muchos movimientos, una lista corrida se vuelve ilegible. */
+  const porDia = useMemo(() => {
+    const mapa = new Map();
+    lista.forEach(it => {
+      const clave = it._fecha;
+      if (!mapa.has(clave)) mapa.set(clave, []);
+      mapa.get(clave).push(it);
+    });
+    const hoyTxt = hoyStr();
+    const ayer = new Date();
+    ayer.setDate(ayer.getDate() - 1);
+    const ayerTxt = `${ayer.getFullYear()}-${pad(ayer.getMonth() + 1)}-${pad(ayer.getDate())}`;
+    return Array.from(mapa.entries()).sort((a, b) => a[0] < b[0] ? 1 : -1).map(([clave, items]) => {
+      const [, m, d] = clave.split("-").map(Number);
+      let titulo = `${d} de ${MESES[m - 1]}`;
+      if (clave === hoyTxt) titulo = "Hoy";else if (clave === ayerTxt) titulo = "Ayer";
+      return {
+        clave,
+        titulo,
+        items,
+        neto: items.reduce((a, i) => a + (i.tipo === "ingreso" ? i._monto : -i._monto), 0)
+      };
+    });
+  }, [lista]);
   const exportar = () => {
     const filas = [["Fecha", "Tipo", "Detalle", "Compañía", "Categoría", "Medio", "Tarjeta", "Cuota", "Monto"]];
     lista.forEach(i => {
@@ -3235,7 +3360,12 @@ function Movimientos({
     style: {
       padding: "2px 2px 12px"
     }
-  }, /*#__PURE__*/React.createElement(Eyebrow, null, lista.length, " movimientos"), /*#__PURE__*/React.createElement(Monto, {
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 13,
+      color: C.muted
+    }
+  }, lista.length, " ", lista.length === 1 ? "movimiento" : "movimientos"), /*#__PURE__*/React.createElement(Monto, {
     v: total,
     size: 14,
     color: total >= 0 ? C.in : C.out,
@@ -3245,13 +3375,37 @@ function Movimientos({
       textAlign: "center",
       padding: 28,
       color: C.muted,
-      fontSize: 14
+      fontSize: 14,
+      lineHeight: 1.5
     }
-  }, "No hay nada con ese filtro.") : /*#__PURE__*/React.createElement(Panel, {
+  }, q ? `No encontré nada con "${q}".` : "No hay nada con ese filtro.") : porDia.map(grupo => /*#__PURE__*/React.createElement("div", {
+    key: grupo.clave,
+    style: {
+      marginBottom: 14
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-baseline justify-between",
+    style: {
+      padding: "0 4px 7px",
+      gap: 10
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 12.5,
+      fontWeight: 600,
+      color: C.muted
+    }
+  }, grupo.titulo), /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontFamily: MONO,
+      fontSize: 12,
+      color: C.muted
+    }
+  }, grupo.neto >= 0 ? "+" : "−", fmt(Math.abs(grupo.neto)).slice(1))), /*#__PURE__*/React.createElement(Panel, {
     style: {
       padding: "4px 16px"
     }
-  }, lista.map((it, i) => /*#__PURE__*/React.createElement(Fila, {
+  }, grupo.items.map((it, i) => /*#__PURE__*/React.createElement(Fila, {
     key: it._id,
     it: it,
     db: db,
@@ -3259,7 +3413,7 @@ function Movimientos({
       if (it.tipo !== "ahorro") setDetalle(db.movs.find(m => m.id === it.id));
     },
     primera: i === 0
-  }))), /*#__PURE__*/React.createElement(Boton, {
+  }))))), /*#__PURE__*/React.createElement(Boton, {
     onClick: exportar,
     style: {
       width: "100%",
@@ -3781,6 +3935,868 @@ function Ajustes({
   }, "Sí, borrar todo"))));
 }
 
+/* ============================ Finanzas ============================
+   Cuatro cosas que no se usan todos los días pero importan:
+   cómo venís, traer un PDF, dónde está la plata, y a dónde va.
+   ================================================================= */
+function Finanzas({
+  db,
+  cur,
+  keyActual,
+  onGuardarInv,
+  onBorrarInv,
+  onGuardarMeta,
+  onBorrarMeta,
+  onImportar
+}) {
+  const [vista, setVista] = useState("analisis");
+  const VISTAS = [{
+    id: "analisis",
+    label: "Cómo venís"
+  }, {
+    id: "importar",
+    label: "Traer PDF"
+  }, {
+    id: "invertir",
+    label: "Invertido"
+  }, {
+    id: "metas",
+    label: "Metas"
+  }];
+  return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    className: "flex",
+    style: {
+      gap: 6,
+      overflowX: "auto",
+      paddingBottom: 14,
+      marginBottom: 2
+    }
+  }, VISTAS.map(v => /*#__PURE__*/React.createElement(Chip, {
+    key: v.id,
+    active: vista === v.id,
+    onClick: () => setVista(v.id),
+    color: C.inv
+  }, v.label))), vista === "analisis" && /*#__PURE__*/React.createElement(Analisis, {
+    db: db,
+    cur: cur,
+    keyActual: keyActual
+  }), vista === "importar" && /*#__PURE__*/React.createElement(Importar, {
+    db: db,
+    onImportar: onImportar
+  }), vista === "invertir" && /*#__PURE__*/React.createElement(Inversiones, {
+    db: db,
+    onGuardar: onGuardarInv,
+    onBorrar: onBorrarInv
+  }), vista === "metas" && /*#__PURE__*/React.createElement(Metas, {
+    db: db,
+    onGuardar: onGuardarMeta,
+    onBorrar: onBorrarMeta
+  }));
+}
+
+/* ============================ Cómo venís ============================ */
+function Analisis({
+  db,
+  cur,
+  keyActual
+}) {
+  const meses = useMemo(() => {
+    const out = [];
+    for (let i = 5; i >= 0; i--) {
+      const d = addM(cur.y, cur.m, -i);
+      const its = [...itemsDelMes(db, d.y, d.m), ...ahorrosDelMes(db, d.y, d.m)];
+      let ing = 0,
+        gas = 0,
+        aho = 0,
+        tarj = 0;
+      its.forEach(it => {
+        if (it.tipo === "ingreso") ing += it._monto;else if (it.tipo === "ahorro") aho += it._monto;else {
+          gas += it._monto;
+          if (it.medio === "tarjeta") tarj += it._monto;
+        }
+      });
+      out.push({
+        ...d,
+        ing,
+        gas,
+        aho,
+        tarj,
+        saldo: ing - gas - aho
+      });
+    }
+    return out;
+  }, [db, cur]);
+  const esteMes = meses[meses.length - 1];
+  const mesAnterior = meses[meses.length - 2];
+  const conDatos = meses.filter(m => m.ing > 0 || m.gas > 0);
+  const promedioIng = conDatos.length ? conDatos.reduce((a, m) => a + m.ing, 0) / conDatos.length : 0;
+  const promedioGas = conDatos.length ? conDatos.reduce((a, m) => a + m.gas, 0) / conDatos.length : 0;
+  const tope = Math.max(1, ...meses.map(m => Math.max(m.ing, m.gas)));
+
+  /* De dónde viene la plata, en los seis meses */
+  const porCia = useMemo(() => {
+    const map = {};
+    meses.forEach(d => {
+      itemsDelMes(db, d.y, d.m).filter(i => i.tipo === "ingreso").forEach(i => {
+        const k = i.cia || "Sin compañía";
+        map[k] = (map[k] || 0) + i._monto;
+      });
+    });
+    return Object.entries(map).sort((a, b) => b[1] - a[1]);
+  }, [db, meses]);
+  const totalCias = porCia.reduce((a, x) => a + x[1], 0);
+
+  /* En qué se va, en los seis meses */
+  const porCat = useMemo(() => {
+    const map = {};
+    meses.forEach(d => {
+      itemsDelMes(db, d.y, d.m).filter(i => i.tipo === "gasto").forEach(i => {
+        const k = i.cat || "Sin categoría";
+        map[k] = (map[k] || 0) + i._monto;
+      });
+    });
+    return Object.entries(map).sort((a, b) => b[1] - a[1]).slice(0, 8);
+  }, [db, meses]);
+  const maxCat = Math.max(1, ...porCat.map(c => c[1]));
+  if (!conDatos.length) {
+    return /*#__PURE__*/React.createElement(Panel, {
+      style: {
+        textAlign: "center",
+        padding: 30
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 14,
+        color: C.muted,
+        lineHeight: 1.55
+      }
+    }, "Acá vas a ver cómo se mueven tus números mes a mes. Cargá algunos movimientos y volvé."));
+  }
+  const variacion = (hoy, antes) => {
+    if (!antes) return null;
+    return Math.round((hoy - antes) / antes * 100);
+  };
+  const varIng = mesAnterior ? variacion(esteMes.ing, mesAnterior.ing) : null;
+  const varGas = mesAnterior ? variacion(esteMes.gas, mesAnterior.gas) : null;
+  return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement(Panel, {
+    style: {
+      padding: "18px 16px 14px"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 15,
+      fontWeight: 700,
+      marginBottom: 3
+    }
+  }, "Los últimos seis meses"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12.5,
+      color: C.muted,
+      marginBottom: 18
+    }
+  }, "Entradas arriba, salidas abajo. La línea del medio es el cero."), /*#__PURE__*/React.createElement("div", {
+    className: "flex",
+    style: {
+      gap: 5,
+      alignItems: "stretch",
+      height: 120
+    }
+  }, meses.map((m, i) => {
+    const esteEs = i === meses.length - 1;
+    return /*#__PURE__*/React.createElement("div", {
+      key: i,
+      style: {
+        flex: 1,
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center"
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        flex: 1,
+        width: "100%",
+        display: "flex",
+        flexDirection: "column",
+        justifyContent: "flex-end"
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        width: "100%",
+        height: `${m.ing / tope * 100}%`,
+        background: C.in,
+        opacity: esteEs ? 1 : 0.42,
+        borderRadius: "3px 3px 0 0",
+        minHeight: m.ing > 0 ? 3 : 0
+      }
+    })), /*#__PURE__*/React.createElement("div", {
+      style: {
+        width: "100%",
+        height: 1,
+        background: C.line
+      }
+    }), /*#__PURE__*/React.createElement("div", {
+      style: {
+        flex: 1,
+        width: "100%"
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        width: "100%",
+        height: `${m.gas / tope * 100}%`,
+        background: C.out,
+        opacity: esteEs ? 1 : 0.42,
+        borderRadius: "0 0 3px 3px",
+        minHeight: m.gas > 0 ? 3 : 0
+      }
+    })), /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 10,
+        color: esteEs ? C.ink : C.muted,
+        fontWeight: esteEs ? 700 : 400,
+        paddingTop: 6
+      }
+    }, MES_CORTO[m.m]));
+  }))), mesAnterior && (mesAnterior.ing > 0 || mesAnterior.gas > 0) && /*#__PURE__*/React.createElement(Panel, {
+    style: {
+      marginTop: 12
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 15,
+      fontWeight: 700,
+      marginBottom: 14
+    }
+  }, MESES[esteMes.m], " contra ", MESES[mesAnterior.m]), /*#__PURE__*/React.createElement(Comparacion, {
+    titulo: "Entró",
+    hoy: esteMes.ing,
+    antes: mesAnterior.ing,
+    pct: varIng,
+    mejorEsMas: true,
+    color: C.in
+  }), /*#__PURE__*/React.createElement(Comparacion, {
+    titulo: "Salió",
+    hoy: esteMes.gas,
+    antes: mesAnterior.gas,
+    pct: varGas,
+    color: C.out
+  })), /*#__PURE__*/React.createElement(Panel, {
+    style: {
+      marginTop: 12
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 15,
+      fontWeight: 700,
+      marginBottom: 4
+    }
+  }, "Tu promedio"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12.5,
+      color: C.muted,
+      marginBottom: 14
+    }
+  }, "Sobre ", conDatos.length, " ", conDatos.length === 1 ? "mes" : "meses", " con movimientos."), /*#__PURE__*/React.createElement("div", {
+    className: "flex",
+    style: {
+      gap: 20
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      flex: 1
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12.5,
+      color: C.muted,
+      marginBottom: 3
+    }
+  }, "Entra por mes"), /*#__PURE__*/React.createElement(Monto, {
+    v: promedioIng,
+    size: 19,
+    color: C.in,
+    weight: 600
+  })), /*#__PURE__*/React.createElement("div", {
+    style: {
+      flex: 1
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12.5,
+      color: C.muted,
+      marginBottom: 3
+    }
+  }, "Sale por mes"), /*#__PURE__*/React.createElement(Monto, {
+    v: promedioGas,
+    size: 19,
+    color: C.out,
+    weight: 600
+  }))), promedioIng > 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12.5,
+      color: C.muted,
+      marginTop: 14,
+      lineHeight: 1.5,
+      borderTop: `1px solid ${C.line}`,
+      paddingTop: 12
+    }
+  }, promedioGas <= promedioIng ? `De cada 100 pesos que entran, se te van ${Math.round(promedioGas / promedioIng * 100)}.` : "En promedio gastás más de lo que entra. Mirá los meses en rojo arriba.")), porCia.length > 0 && /*#__PURE__*/React.createElement(Panel, {
+    style: {
+      marginTop: 12
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 15,
+      fontWeight: 700,
+      marginBottom: 4
+    }
+  }, "De dónde viene la plata"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12.5,
+      color: C.muted,
+      marginBottom: 16
+    }
+  }, "Acumulado de los seis meses."), porCia.map(([cia, v], i) => /*#__PURE__*/React.createElement("div", {
+    key: cia,
+    style: {
+      marginBottom: i === porCia.length - 1 ? 0 : 13
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center justify-between",
+    style: {
+      marginBottom: 5,
+      gap: 10
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 13.5,
+      overflow: "hidden",
+      textOverflow: "ellipsis",
+      whiteSpace: "nowrap"
+    }
+  }, cia), /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontFamily: MONO,
+      fontSize: 12.5,
+      color: C.muted,
+      flexShrink: 0
+    }
+  }, fmt(v), " · ", Math.round(v / totalCias * 100), "%")), /*#__PURE__*/React.createElement(Barra, {
+    pct: v / porCia[0][1] * 100,
+    color: C.in,
+    alto: 5
+  })))), porCat.length > 0 && /*#__PURE__*/React.createElement(Panel, {
+    style: {
+      marginTop: 12
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 15,
+      fontWeight: 700,
+      marginBottom: 4
+    }
+  }, "En qué se va"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12.5,
+      color: C.muted,
+      marginBottom: 16
+    }
+  }, "Acumulado de los seis meses."), porCat.map(([cat, v], i) => /*#__PURE__*/React.createElement("div", {
+    key: cat,
+    style: {
+      marginBottom: i === porCat.length - 1 ? 0 : 13
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center justify-between",
+    style: {
+      marginBottom: 5,
+      gap: 10
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 13.5,
+      overflow: "hidden",
+      textOverflow: "ellipsis",
+      whiteSpace: "nowrap"
+    }
+  }, cat), /*#__PURE__*/React.createElement(Monto, {
+    v: v,
+    size: 12.5,
+    color: C.muted
+  })), /*#__PURE__*/React.createElement(Barra, {
+    pct: v / maxCat * 100,
+    color: C.out,
+    alto: 5
+  })))));
+}
+function Comparacion({
+  titulo,
+  hoy,
+  antes,
+  pct,
+  mejorEsMas,
+  color
+}) {
+  const subio = pct !== null && pct > 0;
+  const bien = mejorEsMas ? subio : !subio;
+  const señal = pct === null ? null : (subio ? "+" : "") + pct + "%";
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginBottom: 14
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-baseline justify-between",
+    style: {
+      marginBottom: 6,
+      gap: 10
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 13.5
+    }
+  }, titulo), /*#__PURE__*/React.createElement("div", {
+    className: "flex items-baseline",
+    style: {
+      gap: 9
+    }
+  }, /*#__PURE__*/React.createElement(Monto, {
+    v: hoy,
+    size: 16,
+    color: color,
+    weight: 600
+  }), señal && /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontFamily: MONO,
+      fontSize: 12,
+      fontWeight: 700,
+      color: bien ? C.in : C.out
+    }
+  }, señal))), /*#__PURE__*/React.createElement("div", {
+    className: "flex",
+    style: {
+      gap: 4,
+      alignItems: "center"
+    }
+  }, /*#__PURE__*/React.createElement(Barra, {
+    pct: antes ? Math.min(100, hoy / Math.max(hoy, antes) * 100) : 100,
+    color: color,
+    alto: 6
+  })), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11.5,
+      color: C.muted,
+      marginTop: 4
+    }
+  }, "antes ", fmt(antes)));
+}
+
+/* ============================ Traer PDF ============================ */
+function Importar({
+  db,
+  onImportar
+}) {
+  const [estado, setEstado] = useState("vacio"); // vacio | leyendo | revisando | listo
+  const [filas, setFilas] = useState([]);
+  const [aviso, setAviso] = useState("");
+  const [nombreArchivo, setNombreArchivo] = useState("");
+  const archivoRef = useRef(null);
+  const elegir = async e => {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = "";
+    if (!file) return;
+    setNombreArchivo(file.name);
+    setAviso("");
+    setEstado("leyendo");
+    try {
+      const texto = await textoDePDF(file);
+      if (!texto || texto.trim().length < 20) {
+        setEstado("vacio");
+        setAviso("Ese PDF no tiene texto seleccionable. Si es una foto o un escaneo, la app no puede leerlo.");
+        return;
+      }
+      const encontrados = leerTexto(texto, {});
+      if (!encontrados.length) {
+        setEstado("vacio");
+        setAviso("Leí el PDF pero no encontré líneas con fecha y monto juntos. Puede que tenga un formato poco común.");
+        return;
+      }
+      setFilas(encontrados.map((m, i) => ({
+        ...m,
+        _id: i,
+        incluir: true
+      })));
+      setEstado("revisando");
+    } catch (err) {
+      setEstado("vacio");
+      setAviso("No se pudo abrir el archivo. Probá con otro PDF.");
+    }
+  };
+  const cambiar = (id, campo, valor) => {
+    setFilas(f => f.map(x => x._id === id ? {
+      ...x,
+      [campo]: valor
+    } : x));
+  };
+  const elegidas = filas.filter(f => f.incluir);
+  const totalGasto = elegidas.filter(f => f.tipo === "gasto").reduce((a, f) => a + f.monto, 0);
+  const totalIngreso = elegidas.filter(f => f.tipo === "ingreso").reduce((a, f) => a + f.monto, 0);
+  const cargar = () => {
+    const tarjeta = db.tarjetas[0];
+    const lista = elegidas.map(f => ({
+      tipo: f.tipo,
+      monto: f.monto,
+      fecha: f.fecha,
+      desc: f.desc,
+      cat: f.cat || "",
+      cia: f.tipo === "ingreso" ? f.cia || "" : "",
+      medio: f.cuotas > 1 ? "tarjeta" : f.medio || "efectivo",
+      tarjetaId: f.cuotas > 1 && tarjeta ? tarjeta.id : "",
+      cuotas: f.cuotas > 1 ? f.cuotas : 1,
+      recurrente: false
+    }));
+    const n = onImportar(lista);
+    setEstado("listo");
+    setAviso(`Listo, cargué ${n} ${n === 1 ? "movimiento" : "movimientos"}.`);
+    setFilas([]);
+  };
+  if (estado === "revisando") {
+    return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement(Panel, {
+      style: {
+        marginBottom: 12
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 15,
+        fontWeight: 700,
+        marginBottom: 4
+      }
+    }, "Revisá antes de cargar"), /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 12.5,
+        color: C.muted,
+        lineHeight: 1.5,
+        marginBottom: 14
+      }
+    }, "Encontré ", filas.length, " ", filas.length === 1 ? "línea" : "líneas", " en ", nombreArchivo, ". Destildá lo que no quieras y corregí lo que esté mal. Nada se guarda hasta que toques el botón de abajo."), /*#__PURE__*/React.createElement("div", {
+      className: "flex",
+      style: {
+        gap: 16
+      }
+    }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 12,
+        color: C.muted
+      }
+    }, "Salidas"), /*#__PURE__*/React.createElement(Monto, {
+      v: totalGasto,
+      size: 17,
+      color: C.out,
+      weight: 600
+    })), totalIngreso > 0 && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 12,
+        color: C.muted
+      }
+    }, "Entradas"), /*#__PURE__*/React.createElement(Monto, {
+      v: totalIngreso,
+      size: 17,
+      color: C.in,
+      weight: 600
+    })), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 12,
+        color: C.muted
+      }
+    }, "Elegidas"), /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontFamily: MONO,
+        fontSize: 17,
+        fontWeight: 600
+      }
+    }, elegidas.length)))), /*#__PURE__*/React.createElement("div", {
+      className: "flex",
+      style: {
+        gap: 8,
+        marginBottom: 12
+      }
+    }, /*#__PURE__*/React.createElement(Boton, {
+      onClick: () => setFilas(f => f.map(x => ({
+        ...x,
+        incluir: true
+      }))),
+      style: {
+        flex: 1
+      }
+    }, "Marcar todas"), /*#__PURE__*/React.createElement(Boton, {
+      onClick: () => setFilas(f => f.map(x => ({
+        ...x,
+        incluir: false
+      }))),
+      style: {
+        flex: 1
+      }
+    }, "Ninguna")), filas.map(f => /*#__PURE__*/React.createElement(FilaImportada, {
+      key: f._id,
+      f: f,
+      db: db,
+      onCambio: cambiar
+    })), /*#__PURE__*/React.createElement("div", {
+      className: "flex",
+      style: {
+        gap: 8,
+        marginTop: 14
+      }
+    }, /*#__PURE__*/React.createElement(Boton, {
+      onClick: () => {
+        setFilas([]);
+        setEstado("vacio");
+      },
+      style: {
+        flex: 1
+      }
+    }, "Cancelar"), /*#__PURE__*/React.createElement(Boton, {
+      tone: "solid",
+      disabled: !elegidas.length,
+      onClick: cargar,
+      style: {
+        flex: 2
+      }
+    }, "Cargar ", elegidas.length, " ", elegidas.length === 1 ? "movimiento" : "movimientos")));
+  }
+  return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement(Panel, {
+    style: {
+      padding: 20
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 15,
+      fontWeight: 700,
+      marginBottom: 6
+    }
+  }, "Traer datos de un PDF"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 13.5,
+      color: C.muted,
+      lineHeight: 1.55,
+      marginBottom: 16
+    }
+  }, "Resumen de tarjeta, extracto del banco, liquidación de comisiones. Busco las líneas que tienen fecha y monto, y te las muestro para que las revises antes de cargarlas."), /*#__PURE__*/React.createElement(Boton, {
+    tone: "solid",
+    onClick: () => archivoRef.current && archivoRef.current.click(),
+    disabled: estado === "leyendo",
+    style: {
+      width: "100%"
+    }
+  }, estado === "leyendo" ? "Leyendo el PDF…" : "Elegir un PDF"), /*#__PURE__*/React.createElement("input", {
+    ref: archivoRef,
+    type: "file",
+    accept: "application/pdf,.pdf",
+    onChange: elegir,
+    style: {
+      display: "none"
+    }
+  }), aviso && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 13,
+      color: estado === "listo" ? C.in : C.out,
+      marginTop: 14,
+      lineHeight: 1.5
+    }
+  }, aviso)), /*#__PURE__*/React.createElement(Panel, {
+    style: {
+      marginTop: 12
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 14,
+      fontWeight: 700,
+      marginBottom: 10
+    }
+  }, "Qué conviene saber"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12.5,
+      color: C.muted,
+      lineHeight: 1.65
+    }
+  }, "El PDF tiene que tener texto de verdad, no ser una foto escaneada. Si lo abrís y podés seleccionar las letras con el dedo, sirve.", /*#__PURE__*/React.createElement("br", null), /*#__PURE__*/React.createElement("br", null), "Reconozco cuotas escritas como 03/12 y las cargo con el plan completo. Los montos los leo con punto de miles y coma decimal, como vienen acá.", /*#__PURE__*/React.createElement("br", null), /*#__PURE__*/React.createElement("br", null), "El archivo no sale de tu teléfono: se lee acá adentro y no se manda a ningún lado.")));
+}
+function FilaImportada({
+  f,
+  db,
+  onCambio
+}) {
+  const [abierta, setAbierta] = useState(false);
+  const cats = f.tipo === "ingreso" ? CAT_INGRESO : CAT_GASTO;
+  return /*#__PURE__*/React.createElement(Panel, {
+    style: {
+      marginBottom: 8,
+      padding: "12px 14px",
+      opacity: f.incluir ? 1 : 0.5
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center",
+    style: {
+      gap: 11
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    onClick: () => onCambio(f._id, "incluir", !f.incluir),
+    style: {
+      width: 20,
+      height: 20,
+      borderRadius: 6,
+      flexShrink: 0,
+      cursor: "pointer",
+      border: `1.5px solid ${f.incluir ? C.ink : C.line}`,
+      background: f.incluir ? C.ink : "transparent",
+      color: C.paper,
+      fontSize: 13,
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center"
+    }
+  }, f.incluir ? "✓" : ""), /*#__PURE__*/React.createElement("div", {
+    onClick: () => setAbierta(!abierta),
+    style: {
+      flex: 1,
+      minWidth: 0,
+      cursor: "pointer"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 14,
+      fontWeight: 500,
+      overflow: "hidden",
+      textOverflow: "ellipsis",
+      whiteSpace: "nowrap"
+    }
+  }, f.desc), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11.5,
+      color: C.muted,
+      marginTop: 2
+    }
+  }, f.fecha, f.cat ? " · " + f.cat : "", f.cuotas > 1 ? ` · ${f.cuotas} cuotas` : "")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      textAlign: "right",
+      flexShrink: 0
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontFamily: MONO,
+      fontSize: 14,
+      fontWeight: 600,
+      color: f.tipo === "ingreso" ? C.in : C.ink
+    }
+  }, f.tipo === "ingreso" ? "+" : "−", fmt(f.monto).slice(1)))), abierta && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: 13,
+      paddingTop: 13,
+      borderTop: `1px solid ${C.line}`
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex",
+    style: {
+      gap: 6,
+      marginBottom: 11
+    }
+  }, /*#__PURE__*/React.createElement(Chip, {
+    active: f.tipo === "gasto",
+    onClick: () => onCambio(f._id, "tipo", "gasto"),
+    color: C.out
+  }, "Gasto"), /*#__PURE__*/React.createElement(Chip, {
+    active: f.tipo === "ingreso",
+    onClick: () => onCambio(f._id, "tipo", "ingreso"),
+    color: C.in
+  }, "Ingreso")), /*#__PURE__*/React.createElement("input", {
+    value: f.desc,
+    onChange: e => onCambio(f._id, "desc", e.target.value),
+    style: {
+      ...inputStyle,
+      fontSize: 14,
+      marginBottom: 10
+    }
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "flex",
+    style: {
+      gap: 6,
+      flexWrap: "wrap",
+      marginBottom: 10
+    }
+  }, cats.map(c => /*#__PURE__*/React.createElement(Chip, {
+    key: c,
+    active: f.cat === c,
+    onClick: () => onCambio(f._id, "cat", f.cat === c ? "" : c),
+    color: f.tipo === "ingreso" ? C.in : C.out
+  }, c))), f.tipo === "ingreso" && db.cias && db.cias.length > 0 && /*#__PURE__*/React.createElement("div", {
+    className: "flex",
+    style: {
+      gap: 6,
+      flexWrap: "wrap",
+      marginBottom: 10
+    }
+  }, db.cias.map(c => /*#__PURE__*/React.createElement(Chip, {
+    key: c,
+    active: f.cia === c,
+    onClick: () => onCambio(f._id, "cia", f.cia === c ? "" : c),
+    color: C.in
+  }, c))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11.5,
+      color: C.muted,
+      lineHeight: 1.5
+    }
+  }, "Del PDF: ", f.linea)));
+}
+
+/* Saca el texto de un PDF usando PDF.js, que se carga a pedido. */
+async function textoDePDF(file) {
+  const pdfjs = await cargarPDFjs();
+  const datos = new Uint8Array(await file.arrayBuffer());
+  const doc = await pdfjs.getDocument({
+    data: datos
+  }).promise;
+  const partes = [];
+  for (let p = 1; p <= doc.numPages; p++) {
+    const pagina = await doc.getPage(p);
+    const contenido = await pagina.getTextContent();
+    // Reagrupo por renglón: los PDF entregan fragmentos sueltos con su posición
+    const renglones = {};
+    contenido.items.forEach(it => {
+      if (!it.str || !it.str.trim()) return;
+      const y = Math.round(it.transform[5]);
+      if (!renglones[y]) renglones[y] = [];
+      renglones[y].push({
+        x: it.transform[4],
+        t: it.str
+      });
+    });
+    Object.keys(renglones).map(Number).sort((a, b) => b - a).forEach(y => {
+      const linea = renglones[y].sort((a, b) => a.x - b.x).map(f => f.t).join(" ");
+      partes.push(linea.replace(/\s{2,}/g, "  ").trim());
+    });
+  }
+  return partes.join("\n");
+}
+let _pdfjs = null;
+function cargarPDFjs() {
+  if (_pdfjs) return _pdfjs;
+  _pdfjs = new Promise((resolve, reject) => {
+    if (window.pdfjsLib) {
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+      return resolve(window.pdfjsLib);
+    }
+    const s = document.createElement("script");
+    s.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
+    s.onload = () => {
+      if (!window.pdfjsLib) return reject(new Error("no cargó"));
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+      resolve(window.pdfjsLib);
+    };
+    s.onerror = () => reject(new Error("sin conexión"));
+    document.head.appendChild(s);
+  });
+  return _pdfjs;
+}
+
 /* ============================ Formulario de movimiento ============================ */
 function FormMov({
   mov,
@@ -3802,6 +4818,24 @@ function FormMov({
   const valorCuota = esTarjeta && Number(f.cuotas) > 1 ? aNumero(f.monto) / Number(f.cuotas) : 0;
   const valido = aNumero(f.monto) > 0 && f.fecha && (!esTarjeta || f.tarjetaId);
   const listaCias = Array.from(new Set([...(db.cias || []), ...CIAS_SUGERIDAS]));
+
+  /* Lo que más repite, para cargar de un toque en vez de escribirlo. */
+  const frecuentes = useMemo(() => {
+    const cuenta = new Map();
+    (db.movs || []).filter(m => m.tipo === f.tipo && m.desc && m.desc.trim()).forEach(m => {
+      const k = m.desc.trim();
+      const act = cuenta.get(k) || {
+        desc: k,
+        veces: 0,
+        cat: m.cat,
+        cia: m.cia,
+        medio: m.medio
+      };
+      act.veces++;
+      cuenta.set(k, act);
+    });
+    return Array.from(cuenta.values()).filter(x => x.veces >= 2).sort((a, b) => b.veces - a.veces).slice(0, 6);
+  }, [db.movs, f.tipo]);
   return /*#__PURE__*/React.createElement(Modal, {
     onClose: onCancel,
     titulo: mov.desc || mov.monto ? "Editar movimiento" : "Cargar movimiento"
@@ -3907,7 +4941,27 @@ function FormMov({
     onChange: e => set("desc", e.target.value),
     placeholder: f.tipo === "ingreso" ? "Comisión póliza flota" : "Nafta, super, cuota del auto…",
     style: inputStyle
-  })), /*#__PURE__*/React.createElement(Campo, {
+  }), frecuentes.length > 0 && /*#__PURE__*/React.createElement("div", {
+    className: "flex",
+    style: {
+      gap: 6,
+      flexWrap: "wrap",
+      marginTop: 9
+    }
+  }, frecuentes.map(x => /*#__PURE__*/React.createElement(Chip, {
+    key: x.desc,
+    active: f.desc === x.desc,
+    color: f.tipo === "ingreso" ? C.in : C.out,
+    onClick: () => {
+      setF(p => ({
+        ...p,
+        desc: x.desc,
+        cat: p.cat || x.cat || "",
+        cia: p.cia || x.cia || "",
+        medio: x.medio || p.medio
+      }));
+    }
+  }, x.desc)))), /*#__PURE__*/React.createElement(Campo, {
     label: "Categoría"
   }, /*#__PURE__*/React.createElement("div", {
     className: "flex",
@@ -4038,6 +5092,7 @@ function FormMov({
     onClick: () => onSave({
       ...f,
       monto: aNumero(f.monto),
+      tarjetaId: esTarjeta ? f.tarjetaId : "",
       cuotas: esTarjeta ? Number(f.cuotas) : 1,
       recurrente: esTarjeta ? false : !!f.recurrente
     }),
