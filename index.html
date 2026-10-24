@@ -51,7 +51,7 @@
 <script>
 /* Actualizador: al abrir, compara con la versión publicada y se refresca solo. */
 (function () {
-  var VERSION = "d6f9386825";
+  var VERSION = "047fb8dfcc";
   window.__PLATA_VERSION__ = VERSION;
   var base = location.pathname;
   try {
@@ -960,15 +960,13 @@ function App() {
   const keyCur = mIdx(cur.y, cur.m);
   const items = useMemo(() => db ? [...itemsDelMes(db, cur.y, cur.m), ...ahorrosDelMes(db, cur.y, cur.m)].sort((a, b) => b._dia - a._dia) : [], [db, cur]);
   const totales = useMemo(() => {
+    /* La tarjeta va por su lado: lo que queda es plata de la cuenta, no mezclada con cuotas. */
     let ing = 0,
       gas = 0,
       tarj = 0,
       aho = 0;
     for (const it of items) {
-      if (it.tipo === "ingreso") ing += it._monto;else if (it.tipo === "ahorro") aho += it._monto;else {
-        gas += it._monto;
-        if (it.medio === "tarjeta") tarj += it._monto;
-      }
+      if (it.tipo === "ingreso") ing += it._monto;else if (it.tipo === "ahorro") aho += it._monto;else if (it.medio === "tarjeta") tarj += it._monto;else gas += it._monto;
     }
     return {
       ing,
@@ -1498,19 +1496,29 @@ function RepartoDelMes({
     color: C.inv,
     punto: true
   })), tarj > 0 && /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center justify-between",
     style: {
-      fontSize: 12.5,
-      color: C.muted,
       marginTop: 12,
       paddingTop: 12,
       borderTop: `1px solid ${C.line}`,
-      lineHeight: 1.5
+      gap: 10
     }
-  }, "De lo que salió, ", fmt(tarj), " es de tarjeta."), aho > 0 && /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12.5,
+      color: C.muted,
+      lineHeight: 1.45
+    }
+  }, "Aparte, de tarjeta", /*#__PURE__*/React.createElement("br", null), "vencen este mes"), /*#__PURE__*/React.createElement(Monto, {
+    v: tarj,
+    size: 15,
+    color: C.gold,
+    weight: 600
+  })), aho > 0 && /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 12,
       color: C.muted,
-      marginTop: 8,
+      marginTop: 10,
       lineHeight: 1.45
     }
   }, "Lo que apartaste para metas e inversiones ya está descontado."));
@@ -1810,6 +1818,8 @@ function Inicio({
   setAjustes
 }) {
   const maxProy = Math.max(1, ...proyeccion.map(p => p.tot));
+  /* El primer mes con plata: ése es el que lleva el número y el acento. */
+  const proxCuota = proyeccion.findIndex(p => p.tot > 0);
   const juego = estadoJuego(db);
   const porCia = useMemo(() => {
     const map = {};
@@ -1864,6 +1874,12 @@ function Inicio({
       color: C.muted
     }
   }, "Te queda en ", MESES[cur.m]), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11.5,
+      color: C.muted,
+      marginTop: 1
+    }
+  }, "plata de la cuenta, sin contar tarjeta"), /*#__PURE__*/React.createElement("div", {
     style: {
       margin: "5px 0 18px"
     }
@@ -2024,14 +2040,14 @@ function Inicio({
       fontFamily: MONO,
       fontSize: 9.5,
       fontWeight: 600,
-      color: i === 0 && p.tot > 0 ? C.gold : "transparent"
+      color: i === proxCuota ? C.gold : "transparent"
     }
   }, p.tot > 0 ? fmtK(p.tot) : "0"), /*#__PURE__*/React.createElement("div", {
     style: {
       width: "100%",
       height: Math.max(3, p.tot / maxProy * 48),
-      background: i === 0 ? C.gold : C.ink,
-      opacity: i === 0 ? 1 : 0.18 + (p.tot > 0 ? 0.35 : 0),
+      background: i === proxCuota ? C.gold : C.ink,
+      opacity: i === proxCuota ? 1 : 0.18 + (p.tot > 0 ? 0.35 : 0),
       borderRadius: 3
     }
   }), /*#__PURE__*/React.createElement("div", {
@@ -4179,15 +4195,13 @@ function Analisis({
     for (let i = 5; i >= 0; i--) {
       const d = addM(cur.y, cur.m, -i);
       const its = [...itemsDelMes(db, d.y, d.m), ...ahorrosDelMes(db, d.y, d.m)];
+      /* Mismo criterio que en Inicio: la tarjeta no se mezcla con el efectivo. */
       let ing = 0,
         gas = 0,
         aho = 0,
         tarj = 0;
       its.forEach(it => {
-        if (it.tipo === "ingreso") ing += it._monto;else if (it.tipo === "ahorro") aho += it._monto;else {
-          gas += it._monto;
-          if (it.medio === "tarjeta") tarj += it._monto;
-        }
+        if (it.tipo === "ingreso") ing += it._monto;else if (it.tipo === "ahorro") aho += it._monto;else if (it.medio === "tarjeta") tarj += it._monto;else gas += it._monto;
       });
       out.push({
         ...d,
@@ -4205,7 +4219,8 @@ function Analisis({
   const conDatos = meses.filter(m => m.ing > 0 || m.gas > 0);
   const promedioIng = conDatos.length ? conDatos.reduce((a, m) => a + m.ing, 0) / conDatos.length : 0;
   const promedioGas = conDatos.length ? conDatos.reduce((a, m) => a + m.gas, 0) / conDatos.length : 0;
-  const tope = Math.max(1, ...meses.map(m => Math.max(m.ing, m.gas)));
+  const promedioTarj = conDatos.length ? conDatos.reduce((a, m) => a + m.tarj, 0) / conDatos.length : 0;
+  const tope = Math.max(1, ...meses.map(m => Math.max(m.ing, m.gas + m.tarj)));
 
   /* De dónde viene la plata, en los seis meses */
   const porCia = useMemo(() => {
@@ -4268,7 +4283,7 @@ function Analisis({
       color: C.muted,
       marginBottom: 18
     }
-  }, "Entradas arriba, salidas abajo. La línea del medio es el cero."), /*#__PURE__*/React.createElement("div", {
+  }, "Entradas arriba, salidas abajo. En dorado, lo que se fue en cuotas de tarjeta."), /*#__PURE__*/React.createElement("div", {
     className: "flex",
     style: {
       gap: 5,
@@ -4319,8 +4334,16 @@ function Analisis({
         height: `${m.gas / tope * 100}%`,
         background: C.out,
         opacity: esteEs ? 1 : 0.42,
-        borderRadius: "0 0 3px 3px",
         minHeight: m.gas > 0 ? 3 : 0
+      }
+    }), /*#__PURE__*/React.createElement("div", {
+      style: {
+        width: "100%",
+        height: `${m.tarj / tope * 100}%`,
+        background: C.gold,
+        opacity: esteEs ? 1 : 0.42,
+        borderRadius: "0 0 3px 3px",
+        minHeight: m.tarj > 0 ? 3 : 0
       }
     })), /*#__PURE__*/React.createElement("div", {
       style: {
@@ -4348,11 +4371,17 @@ function Analisis({
     mejorEsMas: true,
     color: C.in
   }), /*#__PURE__*/React.createElement(Comparacion, {
-    titulo: "Salió",
+    titulo: "Salió de la cuenta",
     hoy: esteMes.gas,
     antes: mesAnterior.gas,
     pct: varGas,
     color: C.out
+  }), (esteMes.tarj > 0 || mesAnterior.tarj > 0) && /*#__PURE__*/React.createElement(Comparacion, {
+    titulo: "Cuotas de tarjeta",
+    hoy: esteMes.tarj,
+    antes: mesAnterior.tarj,
+    pct: pctVar(esteMes.tarj, mesAnterior.tarj),
+    color: C.gold
   })), /*#__PURE__*/React.createElement(Panel, {
     style: {
       marginTop: 12
@@ -4404,7 +4433,31 @@ function Analisis({
     size: 19,
     color: C.out,
     weight: 600
-  }))), promedioIng > 0 && /*#__PURE__*/React.createElement("div", {
+  }), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11,
+      color: C.muted,
+      marginTop: 2
+    }
+  }, "sin tarjeta"))), promedioTarj > 0 && /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center justify-between",
+    style: {
+      marginTop: 14,
+      paddingTop: 12,
+      borderTop: `1px solid ${C.line}`,
+      gap: 10
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12.5,
+      color: C.muted
+    }
+  }, "De tarjeta, por mes"), /*#__PURE__*/React.createElement(Monto, {
+    v: promedioTarj,
+    size: 15,
+    color: C.gold,
+    weight: 600
+  })), promedioIng > 0 && /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 12.5,
       color: C.muted,
@@ -4413,7 +4466,7 @@ function Analisis({
       borderTop: `1px solid ${C.line}`,
       paddingTop: 12
     }
-  }, promedioGas <= promedioIng ? `De cada 100 pesos que entran, se te van ${Math.round(promedioGas / promedioIng * 100)}.` : "En promedio gastás más de lo que entra. Mirá los meses en rojo arriba.")), porCia.length > 0 && /*#__PURE__*/React.createElement(Panel, {
+  }, promedioGas + promedioTarj <= promedioIng ? `De cada 100 pesos que entran, se te van ${Math.round((promedioGas + promedioTarj) / promedioIng * 100)} contando la tarjeta.` : "En promedio gastás más de lo que entra. Mirá los meses en rojo arriba.")), porCia.length > 0 && /*#__PURE__*/React.createElement(Panel, {
     style: {
       marginTop: 12
     }
@@ -4501,6 +4554,10 @@ function Analisis({
     color: C.out,
     alto: 5
   })))));
+}
+function pctVar(hoy, antes) {
+  if (!antes) return null;
+  return Math.round((hoy - antes) / antes * 100);
 }
 function Comparacion({
   titulo,
