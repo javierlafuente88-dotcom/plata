@@ -51,7 +51,7 @@
 <script>
 /* Actualizador: al abrir, compara con la versión publicada y se refresca solo. */
 (function () {
-  var VERSION = "7882116d51";
+  var VERSION = "5a2ddf6d16";
   window.__PLATA_VERSION__ = VERSION;
   var base = location.pathname;
   try {
@@ -255,14 +255,28 @@ async function sincronizar(db) {
       borrados: db.borrados || []
     }
   };
-  const r = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "text/plain;charset=utf-8"
-    },
-    body: JSON.stringify(cuerpo),
-    redirect: "follow"
-  });
+
+  /* Google tarda mucho la primera vez del día: sin un corte, la app
+     se queda esperando para siempre y parece rota. */
+  const corte = new AbortController();
+  const reloj = setTimeout(() => corte.abort(), 90000);
+  let r;
+  try {
+    r = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "text/plain;charset=utf-8"
+      },
+      body: JSON.stringify(cuerpo),
+      redirect: "follow",
+      signal: corte.signal
+    });
+  } catch (e) {
+    if (e.name === "AbortError") throw new Error("La planilla tardó demasiado. Suele pasar la primera vez del día: probá de nuevo en un minuto.");
+    throw new Error("No pude llegar a la planilla. Fijate que tengas internet.");
+  } finally {
+    clearTimeout(reloj);
+  }
   if (!r.ok) throw new Error("La planilla respondió con un error (" + r.status + ").");
   let j;
   try {
@@ -277,7 +291,8 @@ async function sincronizar(db) {
     borrados,
     sync: {
       ...db.sync,
-      ultima: ahora()
+      ultima: ahora(),
+      cargadas: j.cargadas || 0
     }
   };
   TABLAS.forEach(t => {
