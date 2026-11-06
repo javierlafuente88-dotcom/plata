@@ -51,7 +51,7 @@
 <script>
 /* Actualizador: al abrir, compara con la versión publicada y se refresca solo. */
 (function () {
-  var VERSION = "5a2ddf6d16";
+  var VERSION = "3ba34adcca";
   window.__PLATA_VERSION__ = VERSION;
   var base = location.pathname;
   try {
@@ -114,7 +114,13 @@ const MONO = "ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospac
 const SANS = "system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, sans-serif";
 const MESES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
 const MES_CORTO = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
-const CAT_GASTO = ["Supermercado", "Combustible", "Comida y salidas", "Servicios", "Alquiler", "Salud", "Impuestos", "Auto", "Tecnología", "Ropa", "Ocio", "Educación", "Otros"];
+
+/* Los gastos se piensan en dos grupos, igual que en la planilla:
+   los que vuelven todos los meses y los del día a día. */
+const CAT_FIJOS = ["Celular", "Internet", "Luz", "Gas", "Almacén", "Empleada", "Alquiler", "Crédito casa", "Nafta", "Seguro de retiro", "Deportes", "Impuestos", "Juan Pablo", "Pago de tarjeta"];
+const CAT_VARIOS = ["Café", "Salidas", "Otros"];
+const CAT_GASTO = [...CAT_FIJOS, ...CAT_VARIOS];
+const esFija = cat => CAT_FIJOS.indexOf(cat) > -1;
 const CAT_INGRESO = ["Comisiones", "Renovaciones", "Cobranzas", "Bonos y premios", "Otros ingresos"];
 const CIAS_SUGERIDAS = ["Sancor", "RUS", "Galicia Seguros", "Federación Patronal", "Zurich", "Allianz", "La Segunda", "Mercantil Andina"];
 const MEDIOS = [{
@@ -5084,8 +5090,12 @@ function FilaImportada({
   }, cats.map(c => /*#__PURE__*/React.createElement(Chip, {
     key: c,
     active: f.cat === c,
-    onClick: () => onCambio(f._id, "cat", f.cat === c ? "" : c),
-    color: f.tipo === "ingreso" ? C.in : C.out
+    color: f.tipo === "gasto" && esFija(c) ? C.apagado : f.tipo === "ingreso" ? C.in : C.out,
+    onClick: () => {
+      const quita = f.cat === c;
+      onCambio(f._id, "cat", quita ? "" : c);
+      if (f.tipo === "gasto") onCambio(f._id, "recurrente", !quita && esFija(c));
+    }
   }, c))), f.tipo === "ingreso" && db.cias && db.cias.length > 0 && /*#__PURE__*/React.createElement("div", {
     className: "flex",
     style: {
@@ -5194,7 +5204,7 @@ function FormMov({
       act.veces++;
       cuenta.set(k, act);
     });
-    return Array.from(cuenta.values()).filter(x => x.veces >= 2).sort((a, b) => b.veces - a.veces).slice(0, 6);
+    return Array.from(cuenta.values()).filter(x => x.veces >= 2 && CAT_GASTO.indexOf(x.desc) === -1 && CAT_INGRESO.indexOf(x.desc) === -1).sort((a, b) => b.veces - a.veces).slice(0, 6);
   }, [db.movs, f.tipo]);
   return /*#__PURE__*/React.createElement(Modal, {
     onClose: onCancel,
@@ -5299,7 +5309,7 @@ function FormMov({
   }, /*#__PURE__*/React.createElement("input", {
     value: f.desc,
     onChange: e => set("desc", e.target.value),
-    placeholder: f.tipo === "ingreso" ? "Comisión póliza flota" : "Nafta, super, cuota del auto…",
+    placeholder: f.tipo === "ingreso" ? "Comisión póliza flota" : "Dónde fue, para acordarte después",
     style: inputStyle
   }), frecuentes.length > 0 && /*#__PURE__*/React.createElement("div", {
     className: "flex",
@@ -5321,7 +5331,7 @@ function FormMov({
         medio: x.medio || p.medio
       }));
     }
-  }, x.desc)))), /*#__PURE__*/React.createElement(Campo, {
+  }, x.desc)))), f.tipo === "ingreso" ? /*#__PURE__*/React.createElement(Campo, {
     label: "Categoría"
   }, /*#__PURE__*/React.createElement("div", {
     className: "flex",
@@ -5329,11 +5339,56 @@ function FormMov({
       gap: 6,
       flexWrap: "wrap"
     }
-  }, cats.map(c => /*#__PURE__*/React.createElement(Chip, {
+  }, CAT_INGRESO.map(c => /*#__PURE__*/React.createElement(Chip, {
     key: c,
     active: f.cat === c,
     onClick: () => set("cat", f.cat === c ? "" : c),
-    color: f.tipo === "ingreso" ? C.in : C.out
+    color: C.in
+  }, c)))) : /*#__PURE__*/React.createElement(Campo, {
+    label: "Qué gasto es"
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: C.muted,
+      marginBottom: 7
+    }
+  }, "Todos los meses"), /*#__PURE__*/React.createElement("div", {
+    className: "flex",
+    style: {
+      gap: 6,
+      flexWrap: "wrap",
+      marginBottom: 14
+    }
+  }, CAT_FIJOS.map(c => /*#__PURE__*/React.createElement(Chip, {
+    key: c,
+    active: f.cat === c,
+    color: C.apagado,
+    onClick: () => {
+      const quita = f.cat === c;
+      set("cat", quita ? "" : c);
+      set("recurrente", !quita);
+    }
+  }, c))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: C.muted,
+      marginBottom: 7
+    }
+  }, "Del día a día"), /*#__PURE__*/React.createElement("div", {
+    className: "flex",
+    style: {
+      gap: 6,
+      flexWrap: "wrap"
+    }
+  }, CAT_VARIOS.map(c => /*#__PURE__*/React.createElement(Chip, {
+    key: c,
+    active: f.cat === c,
+    color: C.out,
+    onClick: () => {
+      const quita = f.cat === c;
+      set("cat", quita ? "" : c);
+      set("recurrente", false);
+    }
   }, c)))), /*#__PURE__*/React.createElement(Campo, {
     label: "Fecha"
   }, /*#__PURE__*/React.createElement("input", {
@@ -5411,7 +5466,8 @@ function FormMov({
       padding: "13px 14px",
       marginBottom: 16,
       cursor: "pointer"
-    }
+    },
+    title: "Se marca solo según la categoría; tocá si querés cambiarlo"
   }, /*#__PURE__*/React.createElement("div", {
     style: {
       width: 18,
@@ -5436,7 +5492,7 @@ function FormMov({
       fontSize: 11.5,
       color: C.muted
     }
-  }, "alquiler, servicios, suscripciones"))), /*#__PURE__*/React.createElement("div", {
+  }, "se marca solo según la categoría"))), /*#__PURE__*/React.createElement("div", {
     className: "flex",
     style: {
       gap: 8
