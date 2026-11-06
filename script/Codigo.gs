@@ -484,6 +484,11 @@ var MESES_GS = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
 
 var VERDE = '#1F3A2E', ARENA = '#F4F1EA', LINEA = '#D8D4C8', GRIS = '#9AA69F';
 
+/* Además de la planilla de datos, el cuadro se copia a la planilla de siempre,
+   la que mirás todos los días. Siempre en una hoja nueva: no toca las tuyas.
+   Dejalo en '' si alguna vez querés que escriba solo acá. */
+var PLANILLA_DE_SIEMPRE = '13pVUsT9CfNvuDGu8bmsL_mg8dwtAQ29nnpfKu5TK0g4';
+
 /* Reparte un gasto en cuotas sobre los meses en que realmente vence. */
 function cuotasDelMov_(mov, tarjetas) {
   var n = Math.max(1, Number(mov.cuotas) || 1);
@@ -574,7 +579,20 @@ function ordenarPorPeso_(mapa) {
 }
 
 function escribirResumen_(movs, tarjetas, anio) {
-  var libro = SpreadsheetApp.getActiveSpreadsheet();
+  var h = resumenEnLibro_(SpreadsheetApp.getActiveSpreadsheet(), movs, tarjetas, anio);
+
+  /* La copia en la planilla de siempre no puede voltear la sincronización. */
+  if (PLANILLA_DE_SIEMPRE) {
+    try {
+      resumenEnLibro_(SpreadsheetApp.openById(PLANILLA_DE_SIEMPRE), movs, tarjetas, anio);
+    } catch (err) {
+      Logger.log('No pude copiar el cuadro a la planilla de siempre: ' + err);
+    }
+  }
+  return h;
+}
+
+function resumenEnLibro_(libro, movs, tarjetas, anio) {
   var nombre = 'Plata · Resumen ' + anio;
   var h = libro.getSheetByName(nombre);
   if (!h) h = libro.insertSheet(nombre);
