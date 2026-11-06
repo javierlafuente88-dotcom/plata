@@ -51,7 +51,7 @@
 <script>
 /* Actualizador: al abrir, compara con la versión publicada y se refresca solo. */
 (function () {
-  var VERSION = "3ba34adcca";
+  var VERSION = "9224855891";
   window.__PLATA_VERSION__ = VERSION;
   var base = location.pathname;
   try {
@@ -117,8 +117,8 @@ const MES_CORTO = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep"
 
 /* Los gastos se piensan en dos grupos, igual que en la planilla:
    los que vuelven todos los meses y los del día a día. */
-const CAT_FIJOS = ["Celular", "Internet", "Luz", "Gas", "Almacén", "Empleada", "Alquiler", "Crédito casa", "Nafta", "Seguro de retiro", "Deportes", "Impuestos", "Juan Pablo", "Pago de tarjeta"];
-const CAT_VARIOS = ["Café", "Salidas", "Otros"];
+const CAT_FIJOS = ["Celular", "Internet", "Empleada", "Almacén", "Luz", "Gas", "Tarjeta Naranja", "Tarjeta BBVA", "Tarjeta Galicia", "Nafta", "Crédito casa", "Seguro de retiro", "Deportes", "Juan Pablo", "Impuestos"];
+const CAT_VARIOS = ["Salidas", "Café", "Otros"];
 const CAT_GASTO = [...CAT_FIJOS, ...CAT_VARIOS];
 const esFija = cat => CAT_FIJOS.indexOf(cat) > -1;
 const CAT_INGRESO = ["Comisiones", "Renovaciones", "Cobranzas", "Bonos y premios", "Otros ingresos"];
