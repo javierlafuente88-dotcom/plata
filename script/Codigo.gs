@@ -674,8 +674,8 @@ function pintarResumen_(h, largo, marcas) {
   h.setColumnWidth(1, 210);
   for (var c = 2; c <= 14; c++) h.setColumnWidth(c, 112);
 
-  h.getRange(1, 1, 1, 14).merge().setFontSize(15).setFontWeight('bold').setFontColor(VERDE);
-  h.getRange(2, 1, 1, 14).merge().setFontSize(10).setFontColor(GRIS);
+  h.getRange(1, 1).setFontSize(15).setFontWeight('bold').setFontColor(VERDE);
+  h.getRange(2, 1, 1, 6).setFontSize(10).setFontColor(GRIS);
 
   /* La tabla del año */
   h.getRange(4, 1, 1, 8).setFontWeight('bold').setBackground(VERDE).setFontColor('#FFFFFF');
