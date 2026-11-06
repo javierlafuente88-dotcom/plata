@@ -482,6 +482,19 @@ function normalizarMedio_(s) {
 var MESES_GS = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
                 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
 
+/* Las mismas categorías que usa la app: lo que vuelve todos los meses
+   va por un lado y el día a día por otro. */
+var CAT_FIJOS_GS = ['Celular', 'Internet', 'Luz', 'Gas', 'Almacén', 'Empleada',
+                    'Alquiler', 'Crédito casa', 'Nafta', 'Seguro de retiro',
+                    'Deportes', 'Impuestos', 'Juan Pablo', 'Pago de tarjeta'];
+
+function esFijaGS_(cat) {
+  for (var i = 0; i < CAT_FIJOS_GS.length; i++) {
+    if (CAT_FIJOS_GS[i] === cat) return true;
+  }
+  return false;
+}
+
 var VERDE = '#1F3A2E', ARENA = '#F4F1EA', LINEA = '#D8D4C8', GRIS = '#9AA69F';
 
 /* Además de la planilla de datos, el cuadro se copia a la planilla de siempre,
@@ -545,14 +558,15 @@ function armarResumen_(movs, tarjetas, anio) {
         var etq = mv.desc || mv.cat || 'Tarjeta';
         if (!porVario[etq]) porVario[etq] = vacio();
         porVario[etq][m] += monto;
-      } else if (mv.recurrente) {
+      } else if (mv.recurrente || esFijaGS_(mv.cat)) {
         fijos[m] += monto;
-        var fj = mv.desc || mv.cat || 'Fijo';
+        /* La categoría manda: así "Luz" de un mes y de otro caen en la misma fila. */
+        var fj = mv.cat || mv.desc || 'Fijo';
         if (!porFijo[fj]) porFijo[fj] = vacio();
         porFijo[fj][m] += monto;
       } else {
         varios[m] += monto;
-        var vr = mv.cat || mv.desc || 'Otros';
+        var vr = mv.cat || 'Otros';
         if (!porVario[vr]) porVario[vr] = vacio();
         porVario[vr][m] += monto;
       }
