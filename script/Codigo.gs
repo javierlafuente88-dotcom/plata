@@ -488,6 +488,27 @@ var CAT_FIJOS_GS = ['Celular', 'Internet', 'Luz', 'Gas', 'Almacén', 'Empleada',
                     'Alquiler', 'Crédito casa', 'Nafta', 'Seguro de retiro',
                     'Deportes', 'Impuestos', 'Juan Pablo', 'Pago de tarjeta'];
 
+/* Lo cargado antes traía otras categorías. Las traduzco al vuelo para que
+   el cuadro se lea parejo, sin tocar los movimientos ya guardados. */
+var EQUIVALENCIAS = {
+  'Combustible': 'Nafta',
+  'Supermercado': 'Almacén',
+  'Comida y salidas': 'Salidas',
+  'Ocio': 'Salidas',
+  'Servicios': 'Otros',
+  'Salud': 'Otros',
+  'Auto': 'Otros',
+  'Tecnología': 'Otros',
+  'Ropa': 'Otros',
+  'Educación': 'Otros'
+};
+
+function categoriaDe_(mv) {
+  var c = mv.cat || '';
+  if (EQUIVALENCIAS[c]) return EQUIVALENCIAS[c];
+  return c || 'Otros';
+}
+
 function esFijaGS_(cat) {
   for (var i = 0; i < CAT_FIJOS_GS.length; i++) {
     if (CAT_FIJOS_GS[i] === cat) return true;
@@ -553,22 +574,21 @@ function armarResumen_(movs, tarjetas, anio) {
         continue;
       }
 
+      /* Siempre por categoría: el detalle de cada compra se mira en la app. */
+      var cat = categoriaDe_(mv);
+
       if (mv.medio === 'tarjeta') {
         tarjeta[m] += monto;
-        var etq = mv.desc || mv.cat || 'Tarjeta';
-        if (!porVario[etq]) porVario[etq] = vacio();
-        porVario[etq][m] += monto;
-      } else if (mv.recurrente || esFijaGS_(mv.cat)) {
+        if (!porVario[cat]) porVario[cat] = vacio();
+        porVario[cat][m] += monto;
+      } else if (mv.recurrente || esFijaGS_(cat)) {
         fijos[m] += monto;
-        /* La categoría manda: así "Luz" de un mes y de otro caen en la misma fila. */
-        var fj = mv.cat || mv.desc || 'Fijo';
-        if (!porFijo[fj]) porFijo[fj] = vacio();
-        porFijo[fj][m] += monto;
+        if (!porFijo[cat]) porFijo[cat] = vacio();
+        porFijo[cat][m] += monto;
       } else {
         varios[m] += monto;
-        var vr = mv.cat || 'Otros';
-        if (!porVario[vr]) porVario[vr] = vacio();
-        porVario[vr][m] += monto;
+        if (!porVario[cat]) porVario[cat] = vacio();
+        porVario[cat][m] += monto;
       }
     }
   }
