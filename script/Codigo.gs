@@ -484,9 +484,11 @@ var MESES_GS = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
 
 /* Las mismas categorías que usa la app: lo que vuelve todos los meses
    va por un lado y el día a día por otro. */
-var CAT_FIJOS_GS = ['Celular', 'Internet', 'Luz', 'Gas', 'Almacén', 'Empleada',
-                    'Alquiler', 'Crédito casa', 'Nafta', 'Seguro de retiro',
-                    'Deportes', 'Impuestos', 'Juan Pablo', 'Pago de tarjeta'];
+var CAT_FIJOS_GS = ['Celular', 'Internet', 'Empleada', 'Almacén', 'Luz', 'Gas',
+                    'Tarjeta Naranja', 'Tarjeta BBVA', 'Tarjeta Galicia', 'Nafta',
+                    'Crédito casa', 'Seguro de retiro', 'Deportes', 'Juan Pablo',
+                    'Impuestos'];
+var CAT_VARIOS_GS = ['Salidas', 'Café', 'Otros'];
 
 /* Lo cargado antes traía otras categorías. Las traduzco al vuelo para que
    el cuadro se lea parejo, sin tocar los movimientos ya guardados. */
@@ -574,17 +576,20 @@ function armarResumen_(movs, tarjetas, anio) {
         continue;
       }
 
-      /* Siempre por categoría: el detalle de cada compra se mira en la app. */
+      /* Siempre por categoría: el detalle de cada compra se mira en la app.
+         Cómo se pagó no cambia de qué es el gasto. */
       var cat = categoriaDe_(mv);
+      if (mv.medio === 'tarjeta') tarjeta[m] += monto;   // dato aparte, no un balde más
 
-      if (mv.medio === 'tarjeta') {
-        tarjeta[m] += monto;
-        if (!porVario[cat]) porVario[cat] = vacio();
-        porVario[cat][m] += monto;
-      } else if (mv.recurrente || esFijaGS_(cat)) {
+      if (esFijaGS_(cat)) {
         fijos[m] += monto;
         if (!porFijo[cat]) porFijo[cat] = vacio();
         porFijo[cat][m] += monto;
+      } else if (mv.recurrente) {
+        /* Marcado como fijo pero sin una categoría de la lista. */
+        fijos[m] += monto;
+        if (!porFijo['Otros fijos']) porFijo['Otros fijos'] = vacio();
+        porFijo['Otros fijos'][m] += monto;
       } else {
         varios[m] += monto;
         if (!porVario[cat]) porVario[cat] = vacio();
@@ -597,6 +602,35 @@ function armarResumen_(movs, tarjetas, anio) {
     ingresos: ingresos, fijos: fijos, varios: varios, tarjeta: tarjeta,
     porFijo: porFijo, porVario: porVario, porCia: porCia
   };
+}
+
+/* Las filas del cuadro: siempre las mismas y en el mismo orden, aunque un mes
+   dé cero. Así la estructura del año se lee de un vistazo. Lo que aparezca
+   fuera de la lista se agrega al final, para no esconder nada. */
+function filasEnOrden_(mapa, orden) {
+  var vacio = function () { var a = []; for (var i = 0; i < 12; i++) a.push(0); return a; };
+  var filas = [];
+  var puestas = {};
+
+  for (var i = 0; i < orden.length; i++) {
+    var nombre = orden[i];
+    var meses = mapa[nombre] || vacio();
+    var total = 0;
+    for (var m = 0; m < 12; m++) total += meses[m];
+    filas.push({ nombre: nombre, meses: meses, total: total });
+    puestas[nombre] = true;
+  }
+
+  var sueltas = [];
+  for (var k in mapa) {
+    if (!mapa.hasOwnProperty(k) || puestas[k]) continue;
+    var t = 0;
+    for (var j = 0; j < 12; j++) t += mapa[k][j];
+    if (t > 0) sueltas.push({ nombre: k, meses: mapa[k], total: t });
+  }
+  sueltas.sort(function (a, b) { return b.total - a.total; });
+
+  return filas.concat(sueltas);
 }
 
 /* Ordena los conceptos por cuánto pesan en el año. */
@@ -643,28 +677,28 @@ function resumenEnLibro_(libro, movs, tarjetas, anio) {
   filas.push(new Array(14).join(',').split(','));
 
   /* --- El año mes por mes --- */
-  var cab = ['Mes', 'Ingresos', 'Gastos fijos', 'Día a día', 'Tarjeta',
-             'Total gastos', 'Resultado', 'Quedó acumulado'];
+  var cab = ['Mes', 'Ingresos', 'Gastos fijos', 'Gastos varios', 'Total gastos',
+             'Resultado', 'Quedó acumulado', 'De eso, con tarjeta'];
   while (cab.length < 14) cab.push('');
   filas.push(cab);
 
   var acumulado = 0;
   var totIng = 0, totFij = 0, totVar = 0, totTar = 0;
   for (var m = 0; m < 12; m++) {
-    var gastos = r.fijos[m] + r.varios[m] + r.tarjeta[m];
+    var gastos = r.fijos[m] + r.varios[m];
     var resultado = r.ingresos[m] - gastos;
     acumulado += resultado;
     totIng += r.ingresos[m]; totFij += r.fijos[m];
     totVar += r.varios[m]; totTar += r.tarjeta[m];
 
-    var fila = [MESES_GS[m], r.ingresos[m], r.fijos[m], r.varios[m], r.tarjeta[m],
-                gastos, resultado, acumulado];
+    var fila = [MESES_GS[m], r.ingresos[m], r.fijos[m], r.varios[m],
+                gastos, resultado, acumulado, r.tarjeta[m]];
     while (fila.length < 14) fila.push('');
     filas.push(fila);
   }
 
-  var totGas = totFij + totVar + totTar;
-  var filaTot = ['Total del año', totIng, totFij, totVar, totTar, totGas, totIng - totGas, ''];
+  var totGas = totFij + totVar;
+  var filaTot = ['Total del año', totIng, totFij, totVar, totGas, totIng - totGas, '', totTar];
   while (filaTot.length < 14) filaTot.push('');
   filas.push(filaTot);
 
@@ -672,8 +706,8 @@ function resumenEnLibro_(libro, movs, tarjetas, anio) {
   var marcas = { anioDesde: 5, anioHasta: 16, total: 17 };
   var cursor = filas.length + 1;   // 1 fila en blanco entre bloques
 
-  cursor = agregarBloque_(filas, 'Gastos fijos', ordenarPorPeso_(r.porFijo), marcas, 'fijos');
-  cursor = agregarBloque_(filas, 'Gastos varios y tarjeta', ordenarPorPeso_(r.porVario), marcas, 'varios');
+  cursor = agregarBloque_(filas, 'Gastos fijos', filasEnOrden_(r.porFijo, CAT_FIJOS_GS), marcas, 'fijos');
+  cursor = agregarBloque_(filas, 'Gastos varios', filasEnOrden_(r.porVario, CAT_VARIOS_GS), marcas, 'varios');
   cursor = agregarBloque_(filas, 'Ingresos por compañía', ordenarPorPeso_(r.porCia), marcas, 'cias');
 
   h.getRange(1, 1, filas.length, 14).setValues(filas);
