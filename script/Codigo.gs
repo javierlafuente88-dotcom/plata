@@ -485,9 +485,19 @@ var MESES_GS = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
 /* Las mismas categorías que usa la app: lo que vuelve todos los meses
    va por un lado y el día a día por otro. */
 var CAT_FIJOS_GS = ['Celular', 'Internet', 'Empleada', 'Almacén', 'Luz', 'Gas',
-                    'Tarjeta Naranja', 'Tarjeta BBVA', 'Tarjeta Galicia', 'Nafta',
-                    'Crédito casa', 'Seguro de retiro', 'Deportes', 'Juan Pablo',
-                    'Impuestos'];
+                    'Nafta', 'Crédito casa', 'Seguro de retiro', 'Deportes',
+                    'Juan Pablo', 'Impuestos'];
+
+/* Las tarjetas tienen bloque propio: ahí se ve qué se compró en cuotas,
+   cuántas van y cuántas faltan. */
+var CAT_TARJETAS_GS = ['Tarjeta Naranja', 'Tarjeta BBVA', 'Tarjeta Galicia'];
+
+function esDeTarjetaGS_(cat) {
+  for (var i = 0; i < CAT_TARJETAS_GS.length; i++) {
+    if (CAT_TARJETAS_GS[i] === cat) return true;
+  }
+  return false;
+}
 var CAT_VARIOS_GS = ['Salidas', 'Café', 'Otros'];
 
 /* Lo cargado antes traía otras categorías. Las traduzco al vuelo para que
@@ -556,7 +566,8 @@ function armarResumen_(movs, tarjetas, anio) {
   var vacio = function () { var a = []; for (var i = 0; i < 12; i++) a.push(0); return a; };
 
   var ingresos = vacio(), fijos = vacio(), varios = vacio(), tarjeta = vacio();
-  var porFijo = {}, porVario = {}, porCia = {};
+  var porFijo = {}, porVario = {}, porCia = {}, porTarjeta = {};
+  var cuotas = [];   // una por compra en cuotas, para el detalle
 
   for (var i = 0; i < movs.length; i++) {
     var mv = movs[i];
@@ -576,10 +587,17 @@ function armarResumen_(movs, tarjetas, anio) {
         continue;
       }
 
-      /* Siempre por categoría: el detalle de cada compra se mira en la app.
-         Cómo se pagó no cambia de qué es el gasto. */
       var cat = categoriaDe_(mv);
-      if (mv.medio === 'tarjeta') tarjeta[m] += monto;   // dato aparte, no un balde más
+
+      /* Todo lo de tarjeta va al bloque de tarjetas: la compra en cuotas
+         y también el pago del resumen que anotás a mano. */
+      if (mv.medio === 'tarjeta' || esDeTarjetaGS_(cat)) {
+        tarjeta[m] += monto;
+        var nombreTj = mv.medio === 'tarjeta' ? nombreDeTarjeta_(mv, tarjetas) : cat;
+        if (!porTarjeta[nombreTj]) porTarjeta[nombreTj] = vacio();
+        porTarjeta[nombreTj][m] += monto;
+        continue;
+      }
 
       if (esFijaGS_(cat)) {
         fijos[m] += monto;
@@ -598,10 +616,58 @@ function armarResumen_(movs, tarjetas, anio) {
     }
   }
 
+  /* El detalle de cada compra en cuotas, con cuántas ya pagaste. */
+  for (var c = 0; c < movs.length; c++) {
+    var cm = movs[c];
+    if (cm.tipo === 'ingreso' || cm.medio !== 'tarjeta') continue;
+    var n = Math.max(1, Number(cm.cuotas) || 1);
+    if (n < 2) continue;
+
+    var partes = cuotasDelMov_(cm, tarjetas);
+    var esteAnio = vacio();
+    var caeAcá = false;
+    for (var q = 0; q < partes.length; q++) {
+      if (partes[q].y !== anio) continue;
+      esteAnio[partes[q].m] += partes[q].monto;
+      caeAcá = true;
+    }
+    if (!caeAcá) continue;
+
+    cuotas.push({
+      tarjeta: nombreDeTarjeta_(cm, tarjetas),
+      que: cm.desc || cm.cat || 'Compra',
+      total: n,
+      pagadas: cuotasPagadas_(partes),
+      porMes: (Number(cm.monto) || 0) / n,
+      meses: esteAnio
+    });
+  }
+  cuotas.sort(function (a, b) { return (b.total - b.pagadas) - (a.total - a.pagadas); });
+
   return {
     ingresos: ingresos, fijos: fijos, varios: varios, tarjeta: tarjeta,
-    porFijo: porFijo, porVario: porVario, porCia: porCia
+    porFijo: porFijo, porVario: porVario, porCia: porCia,
+    porTarjeta: porTarjeta, cuotas: cuotas
   };
+}
+
+/* El nombre que le pusiste a la tarjeta; si no la encuentro, uno genérico. */
+function nombreDeTarjeta_(mov, tarjetas) {
+  for (var i = 0; i < tarjetas.length; i++) {
+    if (tarjetas[i].id === mov.tarjetaId) return tarjetas[i].nombre || 'Tarjeta';
+  }
+  return 'Tarjeta';
+}
+
+/* Cuántas cuotas ya vencieron, contando hasta el mes en curso. */
+function cuotasPagadas_(partes) {
+  var hoy = new Date();
+  var limite = hoy.getFullYear() * 12 + hoy.getMonth();
+  var pagadas = 0;
+  for (var i = 0; i < partes.length; i++) {
+    if (partes[i].y * 12 + partes[i].m <= limite) pagadas++;
+  }
+  return pagadas;
 }
 
 /* Las filas del cuadro: siempre las mismas y en el mismo orden, aunque un mes
@@ -677,28 +743,28 @@ function resumenEnLibro_(libro, movs, tarjetas, anio) {
   filas.push(new Array(14).join(',').split(','));
 
   /* --- El año mes por mes --- */
-  var cab = ['Mes', 'Ingresos', 'Gastos fijos', 'Gastos varios', 'Total gastos',
-             'Resultado', 'Quedó acumulado', 'De eso, con tarjeta'];
+  var cab = ['Mes', 'Ingresos', 'Gastos fijos', 'Gastos varios', 'Tarjetas',
+             'Total gastos', 'Resultado', 'Quedó acumulado'];
   while (cab.length < 14) cab.push('');
   filas.push(cab);
 
   var acumulado = 0;
   var totIng = 0, totFij = 0, totVar = 0, totTar = 0;
   for (var m = 0; m < 12; m++) {
-    var gastos = r.fijos[m] + r.varios[m];
+    var gastos = r.fijos[m] + r.varios[m] + r.tarjeta[m];
     var resultado = r.ingresos[m] - gastos;
     acumulado += resultado;
     totIng += r.ingresos[m]; totFij += r.fijos[m];
     totVar += r.varios[m]; totTar += r.tarjeta[m];
 
-    var fila = [MESES_GS[m], r.ingresos[m], r.fijos[m], r.varios[m],
-                gastos, resultado, acumulado, r.tarjeta[m]];
+    var fila = [MESES_GS[m], r.ingresos[m], r.fijos[m], r.varios[m], r.tarjeta[m],
+                gastos, resultado, acumulado];
     while (fila.length < 14) fila.push('');
     filas.push(fila);
   }
 
-  var totGas = totFij + totVar;
-  var filaTot = ['Total del año', totIng, totFij, totVar, totGas, totIng - totGas, '', totTar];
+  var totGas = totFij + totVar + totTar;
+  var filaTot = ['Total del año', totIng, totFij, totVar, totTar, totGas, totIng - totGas, ''];
   while (filaTot.length < 14) filaTot.push('');
   filas.push(filaTot);
 
@@ -708,11 +774,49 @@ function resumenEnLibro_(libro, movs, tarjetas, anio) {
 
   cursor = agregarBloque_(filas, 'Gastos fijos', filasEnOrden_(r.porFijo, CAT_FIJOS_GS), marcas, 'fijos');
   cursor = agregarBloque_(filas, 'Gastos varios', filasEnOrden_(r.porVario, CAT_VARIOS_GS), marcas, 'varios');
+  cursor = agregarBloque_(filas, 'Tarjetas', filasDeTarjetas_(r), marcas, 'tarjetas');
   cursor = agregarBloque_(filas, 'Ingresos por compañía', ordenarPorPeso_(r.porCia), marcas, 'cias');
 
   h.getRange(1, 1, filas.length, 14).setValues(filas);
   pintarResumen_(h, filas.length, marcas);
   return h;
+}
+
+/* El bloque de tarjetas: primero cuánto cae por tarjeta cada mes y después,
+   indentado, qué compra es cada cuota y cuántas faltan. */
+function filasDeTarjetas_(r) {
+  var filas = [];
+  var nombres = [];
+  for (var k in r.porTarjeta) {
+    if (r.porTarjeta.hasOwnProperty(k)) nombres.push(k);
+  }
+  nombres.sort();
+
+  for (var i = 0; i < nombres.length; i++) {
+    var nombre = nombres[i];
+    var meses = r.porTarjeta[nombre];
+    var total = 0;
+    for (var m = 0; m < 12; m++) total += meses[m];
+    filas.push({ nombre: nombre, meses: meses, total: total });
+
+    /* Debajo de cada tarjeta, sus compras en cuotas. */
+    for (var c = 0; c < r.cuotas.length; c++) {
+      var cu = r.cuotas[c];
+      if (cu.tarjeta !== nombre) continue;
+      var faltan = cu.total - cu.pagadas;
+      var etiqueta = '    ' + cu.que + ' · cuota ' + cu.pagadas + ' de ' + cu.total +
+                     (faltan > 0 ? '' : ', terminada');
+      var sumaCuota = 0;
+      for (var m2 = 0; m2 < 12; m2++) sumaCuota += cu.meses[m2];
+      filas.push({ nombre: etiqueta, meses: cu.meses, total: sumaCuota, detalle: true });
+    }
+  }
+
+  if (!filas.length) {
+    var cero = []; for (var z = 0; z < 12; z++) cero.push(0);
+    filas.push({ nombre: 'Todavía no hay nada de tarjeta', meses: cero, total: 0 });
+  }
+  return filas;
 }
 
 /* Un bloque: título con los meses, una fila por concepto, y el sub-total. */
@@ -739,7 +843,11 @@ function agregarBloque_(filas, titulo, items, marcas, clave) {
   for (var k = 0; k < items.length; k++) {
     var it = items[k];
     var fila = [it.nombre];
-    for (var m = 0; m < 12; m++) { fila.push(it.meses[m]); sub[m] += it.meses[m]; }
+    for (var m = 0; m < 12; m++) {
+      fila.push(it.meses[m]);
+      /* El detalle de una cuota ya está contado en el total de su tarjeta. */
+      if (!it.detalle) sub[m] += it.meses[m];
+    }
     fila.push(it.total);
     filas.push(fila);
   }
@@ -757,7 +865,7 @@ function agregarBloque_(filas, titulo, items, marcas, clave) {
 
 function pintarResumen_(h, largo, marcas) {
   h.setFrozenColumns(1);
-  h.setColumnWidth(1, 210);
+  h.setColumnWidth(1, 270);   // entra el detalle de cada cuota sin cortarse
   for (var c = 2; c <= 14; c++) h.setColumnWidth(c, 112);
 
   h.getRange(1, 1).setFontSize(15).setFontWeight('bold').setFontColor(VERDE);
