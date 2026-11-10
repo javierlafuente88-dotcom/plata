@@ -884,7 +884,7 @@ function pintarResumen_(h, largo, marcas) {
   h.setConditionalFormatRules([rojo]);
 
   /* Los bloques de detalle */
-  var bloques = ['fijos', 'varios', 'cias'];
+  var bloques = ['fijos', 'varios', 'tarjetas', 'cias'];
   for (var i = 0; i < bloques.length; i++) {
     var b = bloques[i];
     var cab = marcas[b + 'Cab'], desde = marcas[b + 'Desde'], sub = marcas[b + 'Sub'];
