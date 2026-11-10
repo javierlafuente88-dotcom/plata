@@ -51,7 +51,7 @@
 <script>
 /* Actualizador: al abrir, compara con la versión publicada y se refresca solo. */
 (function () {
-  var VERSION = "9224855891";
+  var VERSION = "d44d807da3";
   window.__PLATA_VERSION__ = VERSION;
   var base = location.pathname;
   try {
@@ -593,6 +593,11 @@ function actualizarRacha(juego) {
 }
 
 /* ============================ Storage ============================ */
+/* La planilla viene puesta de fábrica: así cualquier teléfono o compra nueva
+   arranca conectada sin tener que pegar la dirección a mano. Se puede cambiar
+   desde Ajustes, y lo que elijas ahí manda sobre esto. */
+const PLANILLA_DE_FABRICA = "https://script.google.com/macros/s/AKfycbx1eUoDuNrf5BROBWg0YFI5FKy0wjhzJUFh7NWy5klZhrS0Zv_T5CNCNIcXfBv1GE6oNw/exec";
+
 const VACIO = {
   tarjetas: [],
   movs: [],
@@ -606,7 +611,7 @@ const VACIO = {
   },
   borrados: [],
   sync: {
-    url: "",
+    url: PLANILLA_DE_FABRICA,
     ultima: null,
     auto: true
   }
@@ -614,10 +619,22 @@ const VACIO = {
 function cargar() {
   try {
     const raw = localStorage.getItem(KEY) || localStorage.getItem("plata:v1");
-    if (raw) return {
-      ...VACIO,
-      ...JSON.parse(raw)
-    };
+    if (raw) {
+      const db = {
+        ...VACIO,
+        ...JSON.parse(raw)
+      };
+      /* Un teléfono que ya tenía datos pero nunca se conectó: le pongo la
+         planilla de fábrica. Si ya tenía una, no la toco. */
+      if (!(db.sync && db.sync.url)) {
+        db.sync = {
+          ...(db.sync || {}),
+          url: PLANILLA_DE_FABRICA,
+          auto: db.sync && db.sync.auto !== undefined ? db.sync.auto : true
+        };
+      }
+      return db;
+    }
   } catch (e) {/* primera vez */}
   return VACIO;
 }
